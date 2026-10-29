@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "R85jB30tvkI=",
+  "success": true,
+  "projectFilePath": "/Users/smic/ScreenDeck/src/ScreenDeck/ScreenDeck.csproj",
+  "expectedPackageFiles": [
+    "/Users/smic/.nuget/packages/microsoft.windowsdesktop.app.ref/9.0.3/microsoft.windowsdesktop.app.ref.9.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}

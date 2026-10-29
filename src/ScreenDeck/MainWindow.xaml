@@ -1,0 +1,161 @@
+<Window x:Class="ScreenDeck.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ScreenDeck"
+        Title="ScreenDeck" Width="1280" Height="820" MinWidth="720" MinHeight="480"
+        Background="{StaticResource Bg}" Foreground="{StaticResource Fg}"
+        FontFamily="Segoe UI, Malgun Gothic" FontSize="13"
+        AllowDrop="True" PreviewDragOver="Window_PreviewDragOver" DragOver="Window_DragOver"
+        PreviewKeyDown="Window_PreviewKeyDown">
+
+  <Window.Resources>
+    <Style x:Key="FlatButton" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+      <Setter Property="Background" Value="{StaticResource PanelHi}"/>
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="6"
+                    BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="b" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="CardItem" TargetType="ListBoxItem">
+      <Setter Property="Margin" Value="0,0,10,10"/>
+      <Setter Property="Cursor" Value="SizeAll"/>
+      <EventSetter Event="MouseEnter" Handler="Card_MouseEnter"/>
+      <EventSetter Event="MouseLeave" Handler="Card_MouseLeave"/>
+      <EventSetter Event="MouseDoubleClick" Handler="Card_DoubleClick"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListBoxItem">
+            <Border x:Name="card" Width="280" Height="64" CornerRadius="8" Padding="12,8"
+                    Background="{StaticResource PanelHi}" BorderBrush="{StaticResource Border}" BorderThickness="1">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource FgDim}"/>
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter TargetName="card" Property="BorderThickness" Value="2"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <DataTemplate DataType="{x:Type local:WindowInfo}">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="40"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <Image Source="{Binding Icon}" Width="32" Height="32" VerticalAlignment="Center" HorizontalAlignment="Left"
+               RenderOptions.BitmapScalingMode="HighQuality"/>
+        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+          <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                     ToolTip="{Binding Title}"/>
+          <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+            <TextBlock Text="{Binding ProcessName}" Foreground="{StaticResource FgDim}" FontSize="12"/>
+            <TextBlock Text="{Binding StateText}" Foreground="{StaticResource Accent}" FontSize="12" Margin="8,0,0,0"/>
+          </StackPanel>
+        </StackPanel>
+      </Grid>
+    </DataTemplate>
+  </Window.Resources>
+
+  <Grid>
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="3*" MinHeight="160"/>
+        <RowDefinition Height="8"/>
+        <RowDefinition Height="2*" MinHeight="120"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+
+      <!-- Top bar -->
+      <DockPanel Grid.Row="0" Margin="20,14,20,6" LastChildFill="False">
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock Text="ScreenDeck" FontSize="20" FontWeight="Bold"/>
+          <TextBlock Text="  프로그램을 원하는 모니터로 끌어다 놓으세요" Foreground="{StaticResource FgDim}"
+                     VerticalAlignment="Bottom" Margin="4,0,0,3"/>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+          <CheckBox x:Name="MaximizeCheck" IsChecked="True" Foreground="{StaticResource Fg}"
+                    VerticalAlignment="Center" Margin="0,0,18,0" Checked="Option_Changed" Unchecked="Option_Changed"
+                    Content="이동 후 전체 화면(최대화)"/>
+          <TextBlock Text="제어 모니터" Foreground="{StaticResource FgDim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+          <ComboBox x:Name="ControlCombo" Width="220" Margin="0,0,10,0" SelectionChanged="ControlCombo_SelectionChanged"/>
+          <Button Style="{StaticResource FlatButton}" Content="새로고침" Click="Refresh_Click"/>
+        </StackPanel>
+      </DockPanel>
+
+      <!-- Monitor layout preview -->
+      <Border Grid.Row="1" Margin="20,6,20,0" Background="{StaticResource Panel}" CornerRadius="10" Padding="16">
+        <Canvas x:Name="LayoutCanvas" ClipToBounds="True" SizeChanged="LayoutCanvas_SizeChanged"/>
+      </Border>
+
+      <GridSplitter Grid.Row="2" HorizontalAlignment="Stretch" Background="Transparent" Cursor="SizeNS"/>
+
+      <!-- Windows on selected monitor -->
+      <Border Grid.Row="3" Margin="20,0,20,0" Background="{StaticResource Panel}" CornerRadius="10" Padding="16,12,6,6">
+        <DockPanel>
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,10,10">
+            <TextBlock x:Name="ListHeader" FontSize="15" FontWeight="SemiBold" Text="모니터를 선택하세요"/>
+            <TextBlock Text="드래그: 이동 · 더블클릭: 활성화 · 숫자키 1–9: 해당 모니터로 이동 · 우클릭: 메뉴"
+                       Foreground="{StaticResource FgDim}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+          </DockPanel>
+          <Grid>
+            <ListBox x:Name="WindowList" Background="Transparent" BorderThickness="0"
+                     ItemContainerStyle="{StaticResource CardItem}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     PreviewMouseLeftButtonDown="WindowList_PreviewMouseLeftButtonDown"
+                     PreviewMouseMove="WindowList_PreviewMouseMove"
+                     ContextMenuOpening="WindowList_ContextMenuOpening">
+              <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel/>
+                </ItemsPanelTemplate>
+              </ListBox.ItemsPanel>
+              <ListBox.ContextMenu>
+                <ContextMenu/>
+              </ListBox.ContextMenu>
+            </ListBox>
+            <TextBlock x:Name="EmptyText" Text="이 모니터에 실행 중인 프로그램이 없습니다"
+                       Foreground="{StaticResource FgDim}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Visibility="Collapsed"/>
+          </Grid>
+        </DockPanel>
+      </Border>
+
+      <TextBlock x:Name="StatusText" Grid.Row="4" Margin="22,8,20,10" Foreground="{StaticResource FgDim}" Text="준비됨"/>
+    </Grid>
+
+    <!-- Drag ghost layer -->
+    <Canvas IsHitTestVisible="False">
+      <Border x:Name="DragGhost" Visibility="Collapsed" Background="#E62A303B" CornerRadius="8"
+              BorderBrush="{StaticResource Accent}" BorderThickness="2" Padding="10,6">
+        <StackPanel Orientation="Horizontal">
+          <Image x:Name="GhostIcon" Width="24" Height="24" Margin="0,0,8,0"/>
+          <TextBlock x:Name="GhostText" VerticalAlignment="Center" MaxWidth="260" TextTrimming="CharacterEllipsis"
+                     FontWeight="SemiBold"/>
+        </StackPanel>
+      </Border>
+    </Canvas>
+  </Grid>
+</Window>
