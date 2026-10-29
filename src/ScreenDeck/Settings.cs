@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -8,6 +9,7 @@ namespace ScreenDeck
     {
         public string? ControlMonitorDevice { get; set; }
         public bool MaximizeOnMove { get; set; } = true;
+        public Dictionary<string, string> MonitorNames { get; set; } = new();   // DeviceName → custom name
 
         private static string FilePath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ScreenDeck", "settings.json");

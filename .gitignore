@@ -1,0 +1,6 @@
+bin/
+obj/
+*.pdb
+*.user
+.vs/
+dist/ScreenDeck-Setup-*.exe

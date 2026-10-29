@@ -8,9 +8,40 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>ScreenDeck.ico</ApplicationIcon>
+    <!-- Single-file publish: pack WPF's native DLLs (wpfgfx_cor3 etc.) into the exe too,
+         otherwise they land next to it and the installed exe crashes on start. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <AssemblyName>ScreenDeck</AssemblyName>
     <RootNamespace>ScreenDeck</RootNamespace>
-    <Version>1.0.0</Version>
+    <VersionPrefix>1.0</VersionPrefix>
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="ScreenDeck.ico" />
+  </ItemGroup>
+
+  <!-- Bump BuildNumber.txt on every build and use it as the version's third part (1.0.N).
+       Skipped for VS design-time builds and the WPF temporary markup project. -->
+  <Target Name="IncrementBuildNumber" BeforeTargets="BeforeBuild"
+          Condition="'$(DesignTimeBuild)' != 'true' And !$(MSBuildProjectName.EndsWith('_wpftmp'))">
+    <PropertyGroup>
+      <_BuildNumberFile>$(MSBuildThisFileDirectory)BuildNumber.txt</_BuildNumberFile>
+      <_BuildNumber Condition="Exists('$(_BuildNumberFile)')">$([System.IO.File]::ReadAllText('$(_BuildNumberFile)').Trim())</_BuildNumber>
+      <_BuildNumber Condition="'$(_BuildNumber)' == ''">0</_BuildNumber>
+      <_BuildNumber>$([MSBuild]::Add($(_BuildNumber), 1))</_BuildNumber>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_BuildNumberFile)" Lines="$(_BuildNumber)" Overwrite="true" />
+  </Target>
+
+  <Target Name="ApplyBuildNumber" AfterTargets="IncrementBuildNumber" BeforeTargets="BeforeBuild">
+    <PropertyGroup>
+      <_BuildNumber>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)BuildNumber.txt').Trim())</_BuildNumber>
+      <Version>$(VersionPrefix).$(_BuildNumber)</Version>
+      <AssemblyVersion>$(Version).0</AssemblyVersion>
+      <FileVersion>$(Version).0</FileVersion>
+      <InformationalVersion>$(Version)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
 </Project>

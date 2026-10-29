@@ -28,6 +28,7 @@ namespace ScreenDeck
             public Canvas Overlay = null!;
             public Border Highlight = null!;
             public TextBlock Title = null!;
+            public TextBox NameEditor = null!;
             public TextBlock Count = null!;
             public Border ControlBadge = null!;
         }
@@ -56,6 +57,9 @@ namespace ScreenDeck
         public MainWindow()
         {
             InitializeComponent();
+            var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!;
+            VersionText.Text = $"v{version.ToString(3)}";
+            Title = $"ScreenDeck v{version.ToString(3)}";
             WindowList.ItemsSource = _items;
             MaximizeCheck.IsChecked = _settings.MaximizeOnMove;
 
@@ -82,8 +86,8 @@ namespace ScreenDeck
 
         private void OnSourceInitialized()
         {
-            _monitors = WindowManager.GetMonitors();
-            var control = _monitors.FirstOrDefault(m => m.DeviceName == _settings.ControlMonitorDevice)
+            _monitors = LoadMonitors();
+            var control =_monitors.FirstOrDefault(m => m.DeviceName == _settings.ControlMonitorDevice)
                           ?? _monitors.FirstOrDefault(m => m.IsPrimary) ?? _monitors.FirstOrDefault();
             if (control != null) PlaceSelfOn(control);
         }
@@ -99,9 +103,17 @@ namespace ScreenDeck
             RefreshWindows(force: true);
         }
 
+        private List<MonitorInfo> LoadMonitors()
+        {
+            var monitors = WindowManager.GetMonitors();
+            foreach (var m in monitors)
+                if (_settings.MonitorNames.TryGetValue(m.DeviceName, out var name)) m.CustomName = name;
+            return monitors;
+        }
+
         private void RefreshMonitors()
         {
-            _monitors = WindowManager.GetMonitors();
+            _monitors = LoadMonitors();
             string sig = string.Join("|", _monitors.Select(m => $"{m.DeviceName}:{m.Bounds}:{m.WorkArea}"));
             if (sig == _monitorSignature) return;
             _monitorSignature = sig;
@@ -208,13 +220,33 @@ namespace ScreenDeck
                 tile.Overlay = new Canvas { IsHitTestVisible = false, ClipToBounds = true };
                 tile.Overlay.Children.Add(tile.Highlight);
 
-                tile.Title = new TextBlock { FontWeight = FontWeights.SemiBold, Foreground = Brushes.White };
-                tile.Count = new TextBlock { Foreground = new SolidColorBrush(Color.FromRgb(0xC8, 0xCE, 0xD8)), Margin = new Thickness(8, 0, 0, 0) };
+                tile.Title = new TextBlock
+                {
+                    FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center,
+                    ToolTip = "더블클릭하여 이름 변경",
+                };
+                tile.Title.MouseLeftButtonDown += (_, e) => { if (e.ClickCount == 2) { BeginRename(tile); e.Handled = true; } };
+                tile.NameEditor = new TextBox
+                {
+                    MinWidth = 120, MaxLength = 40, Visibility = Visibility.Collapsed, Padding = new Thickness(2, 0, 2, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                tile.NameEditor.KeyDown += (_, e) =>
+                {
+                    if (e.Key == Key.Enter) { EndRename(tile, commit: true); e.Handled = true; }
+                    else if (e.Key == Key.Escape) { EndRename(tile, commit: false); e.Handled = true; }
+                };
+                tile.NameEditor.LostKeyboardFocus += (_, _) => EndRename(tile, commit: true);
+                tile.Count = new TextBlock
+                {
+                    Foreground = new SolidColorBrush(Color.FromRgb(0xC8, 0xCE, 0xD8)), Margin = new Thickness(8, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
                 var labelBar = new Border
                 {
                     Background = new SolidColorBrush(Color.FromArgb(0xCC, 0x10, 0x12, 0x16)),
                     VerticalAlignment = VerticalAlignment.Bottom, Padding = new Thickness(10, 5, 10, 5),
-                    Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { tile.Title, tile.Count } },
+                    Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { tile.Title, tile.NameEditor, tile.Count } },
                 };
 
                 tile.ControlBadge = new Border
@@ -248,8 +280,13 @@ namespace ScreenDeck
                 {
                     Child = grid, BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(6),
                     Cursor = Cursors.Hand, AllowDrop = true, Tag = tile, ClipToBounds = true,
-                    ToolTip = $"{m.DisplayName} · {m.DeviceName.TrimStart('\\', '.')} · {m.Description}",
                 };
+                var renameItem = new MenuItem { Header = "이름 변경..." };
+                renameItem.Click += (_, _) => BeginRename(tile);
+                var resetItem = new MenuItem { Header = "기본 이름으로 되돌리기" };
+                resetItem.Click += (_, _) => RenameMonitor(tile.Monitor, null);
+                tile.Root.ContextMenu = new ContextMenu { Items = { renameItem, resetItem } };
+                tile.Root.ContextMenuOpening += (_, _) => resetItem.IsEnabled = tile.Monitor.CustomName != null;
                 tile.Root.MouseLeftButtonUp += (_, _) => SelectMonitor(tile.Monitor);
                 tile.Root.DragEnter += Tile_DragOver;
                 tile.Root.DragOver += Tile_DragOver;
@@ -300,12 +337,50 @@ namespace ScreenDeck
                     : selected ? (Brush)FindResource("Accent") : (Brush)FindResource("Border");
                 t.ControlBadge.Visibility = isControl ? Visibility.Visible : Visibility.Collapsed;
                 t.Title.Text = t.Monitor.DisplayName + (t.Monitor.IsPrimary ? " (주)" : "");
+                t.Root.ToolTip = $"{t.Monitor.DisplayName} · {t.Monitor.DeviceName.TrimStart('\\', '.')} · {t.Monitor.Description}";
                 int n = _windows.Count(w => w.MonitorHandle == t.Monitor.Handle);
                 t.Count.Text = $"· {t.Monitor.Bounds.Width}×{t.Monitor.Bounds.Height} · 프로그램 {n}개";
 
                 if (((Grid)t.Root.Child).Children.OfType<Border>().FirstOrDefault(c => c.Name == "DropHint") is { } hint)
                     hint.Visibility = hover ? Visibility.Visible : Visibility.Collapsed;
             }
+        }
+
+        private void BeginRename(Tile t)
+        {
+            t.NameEditor.Text = t.Monitor.DisplayName;
+            t.Title.Visibility = Visibility.Collapsed;
+            t.NameEditor.Visibility = Visibility.Visible;
+            t.NameEditor.Focus();
+            t.NameEditor.SelectAll();
+        }
+
+        private void EndRename(Tile t, bool commit)
+        {
+            if (t.NameEditor.Visibility != Visibility.Visible) return;
+            t.NameEditor.Visibility = Visibility.Collapsed;
+            t.Title.Visibility = Visibility.Visible;
+            if (commit) RenameMonitor(t.Monitor, t.NameEditor.Text);
+        }
+
+        /// <summary>Sets (or clears, when empty / equal to the default) a monitor's custom name and saves it.</summary>
+        private void RenameMonitor(MonitorInfo m, string? name)
+        {
+            name = name?.Trim();
+            if (string.IsNullOrEmpty(name) || name == m.DefaultName) name = null;
+            if (name == m.CustomName) return;
+
+            m.CustomName = name;
+            if (name == null) _settings.MonitorNames.Remove(m.DeviceName);
+            else _settings.MonitorNames[m.DeviceName] = name;
+            _settings.Save();
+
+            _suppressComboEvent = true;
+            ControlCombo.Items.Refresh();
+            _suppressComboEvent = false;
+            UpdateTiles();
+            UpdateList();
+            StatusText.Text = $"모니터 이름: {m.DisplayName}";
         }
 
         private void SelectMonitor(MonitorInfo m)
@@ -474,6 +549,7 @@ namespace ScreenDeck
 
         private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (e.OriginalSource is TextBox) return;   // typing a monitor name
             if (WindowList.SelectedItem is not WindowInfo w) return;
             int n = e.Key switch
             {

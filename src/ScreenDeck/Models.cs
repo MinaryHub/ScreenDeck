@@ -13,7 +13,10 @@ namespace ScreenDeck
         public Int32Rect WorkArea { get; init; }
         public bool IsPrimary { get; init; }
 
-        public string DisplayName => $"모니터 {Index}";
+        public string? CustomName { get; set; }      // user-assigned, persisted in Settings.MonitorNames
+
+        public string DefaultName => $"모니터 {Index}";
+        public string DisplayName => string.IsNullOrWhiteSpace(CustomName) ? DefaultName : CustomName;
         public string Description => $"{Bounds.Width}×{Bounds.Height}" + (IsPrimary ? " · 주 모니터" : "");
         public override string ToString() => $"{DisplayName}  ({Description})";
     }
