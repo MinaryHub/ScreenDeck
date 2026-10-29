@@ -53,6 +53,7 @@ namespace ScreenDeck
         private Point _dragStart;
         private WindowInfo? _dragCandidate;
         private Tile? _dropHoverTile;
+        private LiveViewWindow? _liveView;
 
         public MainWindow()
         {
@@ -281,13 +282,20 @@ namespace ScreenDeck
                     Child = grid, BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(6),
                     Cursor = Cursors.Hand, AllowDrop = true, Tag = tile, ClipToBounds = true,
                 };
+                var liveItem = new MenuItem { Header = "확대 보기 · 조작", InputGestureText = "더블클릭" };
+                liveItem.Click += (_, _) => OpenLiveView(tile.Monitor);
                 var renameItem = new MenuItem { Header = "이름 변경..." };
                 renameItem.Click += (_, _) => BeginRename(tile);
                 var resetItem = new MenuItem { Header = "기본 이름으로 되돌리기" };
                 resetItem.Click += (_, _) => RenameMonitor(tile.Monitor, null);
-                tile.Root.ContextMenu = new ContextMenu { Items = { renameItem, resetItem } };
-                tile.Root.ContextMenuOpening += (_, _) => resetItem.IsEnabled = tile.Monitor.CustomName != null;
+                tile.Root.ContextMenu = new ContextMenu { Items = { liveItem, new Separator(), renameItem, resetItem } };
+                tile.Root.ContextMenuOpening += (_, _) =>
+                {
+                    resetItem.IsEnabled = tile.Monitor.CustomName != null;
+                    liveItem.IsEnabled = tile.Monitor.DeviceName != _controlDevice;
+                };
                 tile.Root.MouseLeftButtonUp += (_, _) => SelectMonitor(tile.Monitor);
+                tile.Root.MouseLeftButtonDown += (_, e) => { if (e.ClickCount == 2) { OpenLiveView(tile.Monitor); e.Handled = true; } };
                 tile.Root.DragEnter += Tile_DragOver;
                 tile.Root.DragOver += Tile_DragOver;
                 tile.Root.DragLeave += Tile_DragLeave;
@@ -381,6 +389,27 @@ namespace ScreenDeck
             UpdateTiles();
             UpdateList();
             StatusText.Text = $"모니터 이름: {m.DisplayName}";
+        }
+
+        private void OpenLiveView(MonitorInfo m)
+        {
+            var host = ControlMonitor ?? MonitorOf(OwnHandle);
+            if (host == null) return;
+            if (m.DeviceName == host.DeviceName)
+            {
+                StatusText.Text = "제어 화면 자신은 확대 보기할 수 없습니다. 다른 모니터를 선택하세요.";
+                return;
+            }
+
+            if (_liveView != null)
+            {
+                if (_liveView.Monitor.DeviceName == m.DeviceName) { _liveView.WindowState = WindowState.Maximized; return; }
+                _liveView.Close();
+            }
+            _liveView = new LiveViewWindow(m, host) { Owner = this };
+            _liveView.Closed += (s, _) => { if (_liveView == s) _liveView = null; };
+            _liveView.Show();
+            StatusText.Text = $"{m.DisplayName} 확대 보기 · 클릭/드래그/휠이 해당 모니터로 전달됩니다";
         }
 
         private void SelectMonitor(MonitorInfo m)

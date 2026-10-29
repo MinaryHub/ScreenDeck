@@ -148,6 +148,83 @@ namespace ScreenDeck
         [DllImport("gdi32.dll")]
         public static extern bool DeleteObject(IntPtr obj);
 
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+        public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
+
+        // ── Screen capture (GDI) ──
+
+        public const uint SRCCOPY = 0x00CC0020;
+        public const uint DIB_RGB_COLORS = 0;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BITMAPINFOHEADER
+        {
+            public int biSize, biWidth, biHeight;
+            public short biPlanes, biBitCount;
+            public int biCompression, biSizeImage, biXPelsPerMeter, biYPelsPerMeter, biClrUsed, biClrImportant;
+        }
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetDC(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool DeleteDC(IntPtr hdc);
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER bmi, uint usage,
+            out IntPtr bits, IntPtr section, uint offset);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool GdiFlush();
+
+        // ── Input injection ──
+
+        public const int INPUT_MOUSE = 0;
+        public const uint MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004,
+            MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010, MOUSEEVENTF_MIDDLEDOWN = 0x0020,
+            MOUSEEVENTF_MIDDLEUP = 0x0040, MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_VIRTUALDESK = 0x4000,
+            MOUSEEVENTF_ABSOLUTE = 0x8000;
+
+        public const int SM_XVIRTUALSCREEN = 76, SM_YVIRTUALSCREEN = 77, SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MOUSEINPUT
+        {
+            public int dx, dy;
+            public int mouseData;
+            public uint dwFlags, time;
+            public IntPtr dwExtraInfo;
+        }
+
+        // MOUSEINPUT is the largest member of the native INPUT union, so this matches its size.
+        [StructLayout(LayoutKind.Sequential)]
+        public struct INPUT
+        {
+            public int type;
+            public MOUSEINPUT mi;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+
+        [DllImport("user32.dll")]
+        public static extern bool GetCursorPos(out POINT pt);
+
+        [DllImport("user32.dll")]
+        public static extern int GetSystemMetrics(int index);
+
         public static string GetText(IntPtr hWnd)
         {
             int len = GetWindowTextLength(hWnd);
