@@ -23,7 +23,7 @@ namespace ScreenDeck
 
         private readonly MonitorInfo _monitor;
         private readonly MonitorInfo _host;
-        private readonly MonitorStream _stream;
+        private readonly MonitorStream? _stream;   // null in demo mode
         private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(1) };
         private WriteableBitmap? _bitmap;
         private Point? _downPoint;
@@ -34,19 +34,28 @@ namespace ScreenDeck
             InitializeComponent();
             _monitor = monitor;
             _host = host;
-            Title = $"{monitor.DisplayName} 확대 보기 - ScreenDeck";
+            Title = $"{monitor.DisplayName} Live View - ScreenDeck";
             MonitorText.Text = monitor.DisplayName;
 
-            _stream = new MonitorStream(monitor.Bounds, fps: 30, OnFrame);
-            _statusTimer.Tick += (_, _) => FpsText.Text = $"{_stream.Fps:0} fps · {_monitor.Bounds.Width}×{_monitor.Bounds.Height}";
-            _statusTimer.Start();
+            string size = $"{_monitor.Bounds.Width}×{_monitor.Bounds.Height}";
+            if (DemoData.Enabled)
+            {
+                Screen.Source = DemoData.Preview(monitor, monitor.Bounds.Width);
+                FpsText.Text = $"30 fps · {size}";
+            }
+            else
+            {
+                _stream = new MonitorStream(monitor.Bounds, fps: 30, OnFrame);
+                _statusTimer.Tick += (_, _) => FpsText.Text = $"{_stream.Fps:0} fps · {size}";
+                _statusTimer.Start();
+            }
 
             SourceInitialized += (_, _) => OnSourceInitialized();
-            StateChanged += (_, _) => _stream.Paused = WindowState == WindowState.Minimized;
+            StateChanged += (_, _) => { if (_stream != null) _stream.Paused = WindowState == WindowState.Minimized; };
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             Closed += (_, _) =>
             {
-                _stream.Dispose();
+                _stream?.Dispose();
                 _statusTimer.Stop();
                 SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
             };
@@ -61,7 +70,12 @@ namespace ScreenDeck
             long ex = Native.GetWindowLongPtr(hwnd, Native.GWL_EXSTYLE).ToInt64();
             Native.SetWindowLongPtr(hwnd, Native.GWL_EXSTYLE, new IntPtr(ex | Native.WS_EX_NOACTIVATE));
 
-            // Open maximized on the host monitor.
+            // Open maximized on the host monitor (in demo: on whatever real monitor ScreenDeck is on).
+            if (DemoData.Enabled)
+            {
+                DemoData.SizeForScreenshot(this);
+                return;
+            }
             var wa = _host.WorkArea;
             Native.SetWindowPos(hwnd, IntPtr.Zero, wa.X, wa.Y, wa.Width, wa.Height, Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
             WindowState = WindowState.Maximized;
@@ -124,6 +138,7 @@ namespace ScreenDeck
             Point end = e.GetPosition(Screen);
             if (!TryMap(start, out int x1, out int y1)) return;
 
+            if (DemoData.Enabled) { ShowRipple(start); return; }   // nothing real to control
             if ((end - start).Length < DragThreshold)
             {
                 InputInjector.Click(x1, y1, _downButton);
@@ -141,7 +156,7 @@ namespace ScreenDeck
 
         private void Screen_MouseWheel(object sender, MouseWheelEventArgs e)
         {
-            if (!Controlling || !TryMap(e.GetPosition(Screen), out int x, out int y)) return;
+            if (!Controlling || DemoData.Enabled || !TryMap(e.GetPosition(Screen), out int x, out int y)) return;
             InputInjector.Wheel(x, y, e.Delta);
             e.Handled = true;
         }

@@ -94,16 +94,16 @@
           <TextBlock Text="ScreenDeck" FontSize="20" FontWeight="Bold"/>
           <TextBlock x:Name="VersionText" Foreground="{StaticResource FgDim}" FontSize="12"
                      VerticalAlignment="Bottom" Margin="6,0,0,4"/>
-          <TextBlock Text="  프로그램을 원하는 모니터로 끌어다 놓으세요" Foreground="{StaticResource FgDim}"
+          <TextBlock Text="  Drag programs to the monitor you want" Foreground="{StaticResource FgDim}"
                      VerticalAlignment="Bottom" Margin="4,0,0,3"/>
         </StackPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
           <CheckBox x:Name="MaximizeCheck" IsChecked="True" Foreground="{StaticResource Fg}"
                     VerticalAlignment="Center" Margin="0,0,18,0" Checked="Option_Changed" Unchecked="Option_Changed"
-                    Content="이동 후 전체 화면(최대화)"/>
-          <TextBlock Text="제어 모니터" Foreground="{StaticResource FgDim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    Content="Maximize after move"/>
+          <TextBlock Text="Control monitor" Foreground="{StaticResource FgDim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
           <ComboBox x:Name="ControlCombo" Width="220" Margin="0,0,10,0" SelectionChanged="ControlCombo_SelectionChanged"/>
-          <Button Style="{StaticResource FlatButton}" Content="새로고침" Click="Refresh_Click"/>
+          <Button Style="{StaticResource FlatButton}" Content="Refresh" Click="Refresh_Click"/>
         </StackPanel>
       </DockPanel>
 
@@ -118,8 +118,8 @@
       <Border Grid.Row="3" Margin="20,0,20,0" Background="{StaticResource Panel}" CornerRadius="10" Padding="16,12,6,6">
         <DockPanel>
           <DockPanel DockPanel.Dock="Top" Margin="0,0,10,10">
-            <TextBlock x:Name="ListHeader" FontSize="15" FontWeight="SemiBold" Text="모니터를 선택하세요"/>
-            <TextBlock Text="드래그: 이동 · 더블클릭: 활성화 · 숫자키 1–9: 해당 모니터로 이동 · 우클릭: 메뉴"
+            <TextBlock x:Name="ListHeader" FontSize="15" FontWeight="SemiBold" Text="Select a monitor"/>
+            <TextBlock Text="Drag: move · Double-click: activate · Keys 1–9: move to monitor · Right-click: menu"
                        Foreground="{StaticResource FgDim}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
           </DockPanel>
           <Grid>
@@ -138,14 +138,14 @@
                 <ContextMenu/>
               </ListBox.ContextMenu>
             </ListBox>
-            <TextBlock x:Name="EmptyText" Text="이 모니터에 실행 중인 프로그램이 없습니다"
+            <TextBlock x:Name="EmptyText" Text="No programs running on this monitor"
                        Foreground="{StaticResource FgDim}" HorizontalAlignment="Center" VerticalAlignment="Center"
                        Visibility="Collapsed"/>
           </Grid>
         </DockPanel>
       </Border>
 
-      <TextBlock x:Name="StatusText" Grid.Row="4" Margin="22,8,20,10" Foreground="{StaticResource FgDim}" Text="준비됨"/>
+      <TextBlock x:Name="StatusText" Grid.Row="4" Margin="22,8,20,10" Foreground="{StaticResource FgDim}" Text="Ready"/>
     </Grid>
 
     <!-- Drag ghost layer -->

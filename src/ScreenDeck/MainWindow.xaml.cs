@@ -74,6 +74,10 @@ namespace ScreenDeck
                 _windowTimer.Start();
                 _captureTimer.Start();
                 await CapturePreviewsAsync();
+
+                // "--select N" selects monitor N; "--live N" opens its live view on start.
+                if (MonitorArg("--select") is { } sel) SelectMonitor(sel);
+                if (MonitorArg("--live") is { } live) OpenLiveView(live);
             };
             Closed += (_, _) =>
             {
@@ -85,9 +89,18 @@ namespace ScreenDeck
 
         private IntPtr OwnHandle => new WindowInteropHelper(this).Handle;
 
+        private MonitorInfo? MonitorArg(string name)
+        {
+            var args = Environment.GetCommandLineArgs();
+            int i = Array.IndexOf(args, name);
+            return i >= 0 && i + 1 < args.Length && int.TryParse(args[i + 1], out int n)
+                ? _monitors.FirstOrDefault(m => m.Index == n) : null;
+        }
+
         private void OnSourceInitialized()
         {
             _monitors = LoadMonitors();
+            if (DemoData.Enabled) { DemoData.SizeForScreenshot(this); return; }
             var control =_monitors.FirstOrDefault(m => m.DeviceName == _settings.ControlMonitorDevice)
                           ?? _monitors.FirstOrDefault(m => m.IsPrimary) ?? _monitors.FirstOrDefault();
             if (control != null) PlaceSelfOn(control);
@@ -106,6 +119,7 @@ namespace ScreenDeck
 
         private List<MonitorInfo> LoadMonitors()
         {
+            if (DemoData.Enabled) return DemoData.Monitors;
             var monitors = WindowManager.GetMonitors();
             foreach (var m in monitors)
                 if (_settings.MonitorNames.TryGetValue(m.DeviceName, out var name)) m.CustomName = name;
@@ -119,7 +133,8 @@ namespace ScreenDeck
             if (sig == _monitorSignature) return;
             _monitorSignature = sig;
 
-            _controlDevice = MonitorOf(OwnHandle)?.DeviceName ?? _monitors.FirstOrDefault()?.DeviceName;
+            _controlDevice = DemoData.Enabled ? DemoData.ControlDevice
+                : MonitorOf(OwnHandle)?.DeviceName ?? _monitors.FirstOrDefault()?.DeviceName;
 
             _suppressComboEvent = true;
             ControlCombo.ItemsSource = _monitors;
@@ -137,7 +152,7 @@ namespace ScreenDeck
             if (_isDragging && !force) return;
 
             // Monitor set may change without a DisplaySettingsChanged (e.g. taskbar resize changes work area).
-            var current = WindowManager.GetMonitors();
+            var current = DemoData.Enabled ? DemoData.Monitors : WindowManager.GetMonitors();
             string sig = string.Join("|", current.Select(m => $"{m.DeviceName}:{m.Bounds}:{m.WorkArea}"));
             if (sig != _monitorSignature) RefreshMonitors();
 
@@ -151,8 +166,12 @@ namespace ScreenDeck
                 _suppressComboEvent = false;
             }
 
-            _windows = WindowManager.GetWindows(_ownPid);
-            foreach (var w in _windows) w.Icon = GetIcon(w);
+            if (DemoData.Enabled) _windows = DemoData.Windows;   // icons are built in
+            else
+            {
+                _windows = WindowManager.GetWindows(_ownPid);
+                foreach (var w in _windows) w.Icon = GetIcon(w);
+            }
 
             // Drop icon cache entries of closed windows.
             var alive = new HashSet<IntPtr>(_windows.Select(w => w.Handle));
@@ -167,8 +186,8 @@ namespace ScreenDeck
             var mon = SelectedMonitor;
             var newItems = mon == null ? new List<WindowInfo>() : _windows.Where(w => w.MonitorHandle == mon.Handle).ToList();
 
-            ListHeader.Text = mon == null ? "모니터를 선택하세요"
-                : $"{mon.DisplayName}에서 실행 중인 프로그램  ({newItems.Count})";
+            ListHeader.Text = mon == null ? "Select a monitor"
+                : $"Programs on {mon.DisplayName}  ({newItems.Count})";
             EmptyText.Visibility = newItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
             // Avoid flicker: only rebuild when something visible changed.
@@ -224,7 +243,7 @@ namespace ScreenDeck
                 tile.Title = new TextBlock
                 {
                     FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center,
-                    ToolTip = "더블클릭하여 이름 변경",
+                    ToolTip = "Double-click to rename",
                 };
                 tile.Title.MouseLeftButtonDown += (_, e) => { if (e.ClickCount == 2) { BeginRename(tile); e.Handled = true; } };
                 tile.NameEditor = new TextBox
@@ -255,7 +274,7 @@ namespace ScreenDeck
                     Background = (Brush)FindResource("Accent"), CornerRadius = new CornerRadius(4),
                     Padding = new Thickness(7, 2, 7, 2), Margin = new Thickness(8),
                     HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
-                    Child = new TextBlock { Text = "제어 화면", Foreground = Brushes.White, FontSize = 11, FontWeight = FontWeights.SemiBold },
+                    Child = new TextBlock { Text = "Control", Foreground = Brushes.White, FontSize = 11, FontWeight = FontWeights.SemiBold },
                 };
 
                 var dropHint = new Border
@@ -265,7 +284,7 @@ namespace ScreenDeck
                     Visibility = Visibility.Collapsed,
                     Child = new TextBlock
                     {
-                        Text = "여기에 놓기", Foreground = Brushes.White, FontSize = 18, FontWeight = FontWeights.Bold,
+                        Text = "Drop here", Foreground = Brushes.White, FontSize = 18, FontWeight = FontWeights.Bold,
                         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
                     },
                 };
@@ -282,11 +301,11 @@ namespace ScreenDeck
                     Child = grid, BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(6),
                     Cursor = Cursors.Hand, AllowDrop = true, Tag = tile, ClipToBounds = true,
                 };
-                var liveItem = new MenuItem { Header = "확대 보기 · 조작", InputGestureText = "더블클릭" };
+                var liveItem = new MenuItem { Header = "Live view & control", InputGestureText = "Double-click" };
                 liveItem.Click += (_, _) => OpenLiveView(tile.Monitor);
-                var renameItem = new MenuItem { Header = "이름 변경..." };
+                var renameItem = new MenuItem { Header = "Rename..." };
                 renameItem.Click += (_, _) => BeginRename(tile);
-                var resetItem = new MenuItem { Header = "기본 이름으로 되돌리기" };
+                var resetItem = new MenuItem { Header = "Reset to default name" };
                 resetItem.Click += (_, _) => RenameMonitor(tile.Monitor, null);
                 tile.Root.ContextMenu = new ContextMenu { Items = { liveItem, new Separator(), renameItem, resetItem } };
                 tile.Root.ContextMenuOpening += (_, _) =>
@@ -344,10 +363,10 @@ namespace ScreenDeck
                 t.Root.BorderBrush = hover ? (Brush)FindResource("Drop")
                     : selected ? (Brush)FindResource("Accent") : (Brush)FindResource("Border");
                 t.ControlBadge.Visibility = isControl ? Visibility.Visible : Visibility.Collapsed;
-                t.Title.Text = t.Monitor.DisplayName + (t.Monitor.IsPrimary ? " (주)" : "");
+                t.Title.Text = t.Monitor.DisplayName + (t.Monitor.IsPrimary ? " (Primary)" : "");
                 t.Root.ToolTip = $"{t.Monitor.DisplayName} · {t.Monitor.DeviceName.TrimStart('\\', '.')} · {t.Monitor.Description}";
                 int n = _windows.Count(w => w.MonitorHandle == t.Monitor.Handle);
-                t.Count.Text = $"· {t.Monitor.Bounds.Width}×{t.Monitor.Bounds.Height} · 프로그램 {n}개";
+                t.Count.Text = $"· {t.Monitor.Bounds.Width}×{t.Monitor.Bounds.Height} · {n} program{(n == 1 ? "" : "s")}";
 
                 if (((Grid)t.Root.Child).Children.OfType<Border>().FirstOrDefault(c => c.Name == "DropHint") is { } hint)
                     hint.Visibility = hover ? Visibility.Visible : Visibility.Collapsed;
@@ -388,7 +407,7 @@ namespace ScreenDeck
             _suppressComboEvent = false;
             UpdateTiles();
             UpdateList();
-            StatusText.Text = $"모니터 이름: {m.DisplayName}";
+            StatusText.Text = $"Monitor renamed: {m.DisplayName}";
         }
 
         private void OpenLiveView(MonitorInfo m)
@@ -397,7 +416,7 @@ namespace ScreenDeck
             if (host == null) return;
             if (m.DeviceName == host.DeviceName)
             {
-                StatusText.Text = "제어 화면 자신은 확대 보기할 수 없습니다. 다른 모니터를 선택하세요.";
+                StatusText.Text = "The control monitor can't show a live view of itself. Choose another monitor.";
                 return;
             }
 
@@ -409,7 +428,7 @@ namespace ScreenDeck
             _liveView = new LiveViewWindow(m, host) { Owner = this };
             _liveView.Closed += (s, _) => { if (_liveView == s) _liveView = null; };
             _liveView.Show();
-            StatusText.Text = $"{m.DisplayName} 확대 보기 · 클릭/드래그/휠이 해당 모니터로 전달됩니다";
+            StatusText.Text = $"Live view of {m.DisplayName} · Clicks, drags and scrolling go to that monitor";
         }
 
         private void SelectMonitor(MonitorInfo m)
@@ -431,6 +450,7 @@ namespace ScreenDeck
                     // Physical pixels of the tile (approx.) → avoid capturing more detail than we can show.
                     double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
                     int maxW = (int)Math.Clamp(t.Root.ActualWidth * dpi * 1.25, 160, 1280);
+                    if (DemoData.Enabled) { t.Preview.Source = DemoData.Preview(t.Monitor, maxW); continue; }
                     var bmp = await Task.Run(() => ScreenCapture.Capture(bounds, maxW));
                     if (bmp != null) t.Preview.Source = bmp;
                 }
@@ -550,6 +570,16 @@ namespace ScreenDeck
 
         private void MoveWindow(WindowInfo w, MonitorInfo target)
         {
+            if (DemoData.Enabled)
+            {
+                bool max = MaximizeCheck.IsChecked == true;
+                DemoData.Move(w, target, max);
+                StatusText.Text = $"'{w.Title}' → {target.DisplayName}" + (max ? " (maximized)" : "");
+                RefreshWindows(force: true);
+                _ = CapturePreviewsAsync();
+                return;
+            }
+
             var source = _monitors.FirstOrDefault(m => m.Handle == Native.MonitorFromWindow(w.Handle, Native.MONITOR_DEFAULTTONEAREST))
                          ?? _monitors.FirstOrDefault(m => m.Handle == w.MonitorHandle);
             if (source == null) { RefreshAll(); return; }
@@ -557,17 +587,17 @@ namespace ScreenDeck
             bool maximize = MaximizeCheck.IsChecked == true;
             if (source.Handle == target.Handle && !maximize)
             {
-                StatusText.Text = $"'{w.Title}' 은(는) 이미 {target.DisplayName}에 있습니다.";
+                StatusText.Text = $"'{w.Title}' is already on {target.DisplayName}.";
                 return;
             }
 
             var result = WindowManager.MoveToMonitor(w.Handle, source, target, maximize);
             StatusText.Text = result switch
             {
-                MoveResult.Ok => $"'{w.Title}' → {target.DisplayName}" + (maximize ? " (전체 화면)" : ""),
-                MoveResult.AccessDenied => $"'{w.Title}' 은(는) 관리자 권한 프로그램이라 이동할 수 없습니다. ScreenDeck을 관리자 권한으로 실행하세요.",
-                MoveResult.Gone => "프로그램이 이미 종료되었습니다.",
-                _ => $"'{w.Title}' 이동에 실패했습니다.",
+                MoveResult.Ok => $"'{w.Title}' → {target.DisplayName}" + (maximize ? " (maximized)" : ""),
+                MoveResult.AccessDenied => $"'{w.Title}' runs as administrator and can't be moved. Run ScreenDeck as administrator.",
+                MoveResult.Gone => "The program has already closed.",
+                _ => $"Couldn't move '{w.Title}'.",
             };
 
             // Maximizing activates the moved window; give focus back to the control screen
@@ -610,7 +640,7 @@ namespace ScreenDeck
             {
                 var mi = new MenuItem
                 {
-                    Header = $"{m.DisplayName}(으)로 이동" + (m.DeviceName == _controlDevice ? "  · 제어 화면" : ""),
+                    Header = $"Move to {m.DisplayName}" + (m.DeviceName == _controlDevice ? "  · Control" : ""),
                     InputGestureText = m.Index <= 9 ? m.Index.ToString() : "",
                     IsEnabled = m.Handle != w.MonitorHandle || MaximizeCheck.IsChecked == true,
                 };
@@ -619,7 +649,7 @@ namespace ScreenDeck
                 menu.Items.Add(mi);
             }
             menu.Items.Add(new Separator());
-            var activate = new MenuItem { Header = "앞으로 가져오기", InputGestureText = "Enter" };
+            var activate = new MenuItem { Header = "Bring to front", InputGestureText = "Enter" };
             activate.Click += (_, _) => WindowManager.Activate(w.Handle);
             menu.Items.Add(activate);
         }
@@ -634,6 +664,8 @@ namespace ScreenDeck
 
         private void PlaceSelfOn(MonitorInfo target)
         {
+            if (DemoData.Enabled) return;   // demo monitors don't exist; stay where we are
+
             IntPtr me = OwnHandle;
             if (me == IntPtr.Zero) return;
             var source = MonitorOf(me) ?? target;
@@ -660,7 +692,7 @@ namespace ScreenDeck
             _monitorSignature = "";
             RefreshAll();
             await CapturePreviewsAsync();
-            StatusText.Text = $"모니터 {_monitors.Count}개, 프로그램 {_windows.Count}개";
+            StatusText.Text = $"{_monitors.Count} monitors, {_windows.Count} programs";
         }
 
         // ───────────────────────── Helpers ─────────────────────────

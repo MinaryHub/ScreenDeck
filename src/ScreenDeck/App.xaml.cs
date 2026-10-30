@@ -22,7 +22,7 @@ namespace ScreenDeck
         private static void Report(Exception? ex)
         {
             Log(ex);
-            MessageBox.Show($"ScreenDeck에 오류가 발생했습니다.\n\n{ex?.Message}\n\n로그: {LogPath}",
+            MessageBox.Show($"ScreenDeck ran into an error.\n\n{ex?.Message}\n\nLog: {LogPath}",
                 "ScreenDeck", MessageBoxButton.OK, MessageBoxImage.Error);
         }
 

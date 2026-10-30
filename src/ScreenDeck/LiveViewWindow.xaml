@@ -1,7 +1,7 @@
 <Window x:Class="ScreenDeck.LiveViewWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="ScreenDeck 확대 보기" Icon="ScreenDeck.ico" Width="1280" Height="760"
+        Title="ScreenDeck Live View" Icon="ScreenDeck.ico" Width="1280" Height="760"
         Background="{StaticResource Bg}" Foreground="{StaticResource Fg}"
         FontFamily="Segoe UI, Malgun Gothic" FontSize="13"
         ShowActivated="False" ShowInTaskbar="False">
@@ -16,13 +16,13 @@
         </StackPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
           <CheckBox x:Name="ControlCheck" IsChecked="True" Foreground="{StaticResource Fg}" VerticalAlignment="Center"
-                    Margin="0,0,16,0" Content="마우스·키보드 조작"/>
-          <Button Content="닫기" Click="Close_Click" Foreground="{StaticResource Fg}" Background="{StaticResource PanelHi}"
+                    Margin="0,0,16,0" Content="Mouse &amp; keyboard control"/>
+          <Button Content="Close" Click="Close_Click" Foreground="{StaticResource Fg}" Background="{StaticResource PanelHi}"
                   BorderBrush="{StaticResource Border}" Padding="14,4" Cursor="Hand"/>
         </StackPanel>
         <TextBlock x:Name="HintText" DockPanel.Dock="Right" Foreground="{StaticResource FgDim}" VerticalAlignment="Center"
                    Margin="0,0,20,0"
-                   Text="클릭·드래그·휠이 해당 모니터로 전달됩니다 · 클릭한 프로그램에 바로 키보드 입력"/>
+                   Text="Clicks, drags and scrolling go to that monitor · Type straight into the program you click"/>
       </DockPanel>
     </Border>
 

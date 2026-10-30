@@ -15,9 +15,9 @@ namespace ScreenDeck
 
         public string? CustomName { get; set; }      // user-assigned, persisted in Settings.MonitorNames
 
-        public string DefaultName => $"모니터 {Index}";
+        public string DefaultName => $"Monitor {Index}";
         public string DisplayName => string.IsNullOrWhiteSpace(CustomName) ? DefaultName : CustomName;
-        public string Description => $"{Bounds.Width}×{Bounds.Height}" + (IsPrimary ? " · 주 모니터" : "");
+        public string Description => $"{Bounds.Width}×{Bounds.Height}" + (IsPrimary ? " · Primary" : "");
         public override string ToString() => $"{DisplayName}  ({Description})";
     }
 
@@ -34,7 +34,7 @@ namespace ScreenDeck
         public bool IsMaximized { get; set; }
         public ImageSource? Icon { get; set; }
 
-        public string StateText => IsMinimized ? "최소화됨" : IsMaximized ? "최대화" : "";
+        public string StateText => IsMinimized ? "Minimized" : IsMaximized ? "Maximized" : "";
     }
 
     public enum MoveResult { Ok, AccessDenied, Gone, Failed }

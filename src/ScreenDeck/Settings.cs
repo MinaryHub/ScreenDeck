@@ -16,6 +16,7 @@ namespace ScreenDeck
 
         public static Settings Load()
         {
+            if (DemoData.Enabled) return new Settings();   // demo never reads or writes the real settings
             try
             {
                 if (File.Exists(FilePath))
@@ -27,6 +28,7 @@ namespace ScreenDeck
 
         public void Save()
         {
+            if (DemoData.Enabled) return;
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
