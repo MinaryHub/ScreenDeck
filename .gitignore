@@ -3,4 +3,5 @@ obj/
 *.pdb
 *.user
 .vs/
-dist/ScreenDeck-Setup-*.exe
+# Build output; releases are published on GitHub Releases instead.
+dist/
