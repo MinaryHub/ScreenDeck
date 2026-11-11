@@ -63,6 +63,10 @@ namespace ScreenDeck
             Title = $"ScreenDeck v{version.ToString(3)}";
             WindowList.ItemsSource = _items;
             MaximizeCheck.IsChecked = _settings.MaximizeOnMove;
+            FadeCheck.IsChecked = _settings.FadeOnMove;
+            FadeSlider.Value = _settings.FadeDurationMs;
+            _loadingOptions = false;
+            UpdateFadeControls();
 
             _windowTimer.Tick += (_, _) => RefreshWindows();
             _captureTimer.Tick += async (_, _) => await CapturePreviewsAsync();
@@ -568,7 +572,7 @@ namespace ScreenDeck
 
         // ───────────────────────── Moving ─────────────────────────
 
-        private void MoveWindow(WindowInfo w, MonitorInfo target)
+        private async void MoveWindow(WindowInfo w, MonitorInfo target)
         {
             if (DemoData.Enabled)
             {
@@ -591,7 +595,24 @@ namespace ScreenDeck
                 return;
             }
 
+            // Ghost of the window on its old monitor, faded out after the real window has moved.
+            FadeOverlay? ghost = null;
+            if (_settings.FadeOnMove && source.Handle != target.Handle)
+            {
+                try
+                {
+                    ghost = FadeOverlay.TryShow(w.Handle, source);
+                    if (ghost != null) await ghost.WaitUntilVisibleAsync();
+                }
+                catch { ghost?.Close(); ghost = null; }
+            }
+
             var result = WindowManager.MoveToMonitor(w.Handle, source, target, maximize);
+            if (ghost != null)
+            {
+                if (result == MoveResult.Ok) ghost.FadeOut(_settings.FadeDurationMs);
+                else ghost.Close();
+            }
             StatusText.Text = result switch
             {
                 MoveResult.Ok => $"'{w.Title}' → {target.DisplayName}" + (maximize ? " (maximized)" : ""),
@@ -681,10 +702,34 @@ namespace ScreenDeck
             Activate();
         }
 
+        // True until the saved options are applied: the XAML loader raises Checked before all controls exist.
+        private bool _loadingOptions = true;
+
         private void Option_Changed(object sender, RoutedEventArgs e)
         {
+            UpdateFadeControls();
+            if (_loadingOptions) return;
             _settings.MaximizeOnMove = MaximizeCheck.IsChecked == true;
+            _settings.FadeOnMove = FadeCheck.IsChecked == true;
             _settings.Save();
+        }
+
+        private void FadeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            UpdateFadeControls();
+            if (_loadingOptions || FadeSlider == null) return;
+            _settings.FadeDurationMs = (int)FadeSlider.Value;
+            _settings.Save();
+        }
+
+        private void UpdateFadeControls()
+        {
+            if (FadeSlider == null || FadeText == null || FadeCheck == null) return;   // during InitializeComponent
+            bool on = FadeCheck.IsChecked == true;
+            FadeSlider.IsEnabled = on;
+            FadeText.Opacity = on ? 1 : 0.5;
+            int ms = (int)FadeSlider.Value;
+            FadeText.Text = ms >= 1000 ? $"{ms / 1000.0:0.##} s" : $"{ms} ms";
         }
 
         private async void Refresh_Click(object sender, RoutedEventArgs e)

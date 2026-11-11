@@ -25,14 +25,16 @@ namespace ScreenDeck
                     g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, new System.Drawing.Size(bounds.Width, bounds.Height),
                         CopyPixelOperation.SourceCopy);
 
-                using var small = new Bitmap(tw, th, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
-                using (var g = Graphics.FromImage(small))
-                {
-                    g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                    g.DrawImage(full, 0, 0, tw, th);
-                }
+                bool resample = tw != bounds.Width || th != bounds.Height;   // full resolution: use as is
+                using var small = resample ? new Bitmap(tw, th, System.Drawing.Imaging.PixelFormat.Format32bppRgb) : null;
+                if (small != null)
+                    using (var g = Graphics.FromImage(small))
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                        g.DrawImage(full, 0, 0, tw, th);
+                    }
 
-                IntPtr hBmp = small.GetHbitmap();
+                IntPtr hBmp = (small ?? full).GetHbitmap();
                 try
                 {
                     var src = Imaging.CreateBitmapSourceFromHBitmap(hBmp, IntPtr.Zero, Int32Rect.Empty,

@@ -33,6 +33,7 @@ ScreenDeck is a Windows app for multi-monitor setups. Keep one screen as your **
 | Live view & control | Double-click a monitor, or right-click → **Live view & control** |
 | Rename a monitor | Double-click its name, or right-click → **Rename...** |
 | Keep size and position | Uncheck **Maximize after move** |
+| Fade-out effect | **Fade out** on/off; the slider sets its length (0.1–3 s, default 300 ms) |
 
 ![Monitor selected](screenshots/03-monitor-selected.png)
 
@@ -114,6 +115,7 @@ ScreenDeck은 여러 모니터를 쓰는 Windows 환경을 위한 앱입니다. 
 | 확대 보기·조작 | 모니터 더블클릭, 또는 우클릭 → **Live view & control** |
 | 모니터 이름 바꾸기 | 이름 더블클릭, 또는 우클릭 → **Rename...** |
 | 크기·위치 유지 | **Maximize after move** 체크 해제 |
+| 페이드아웃 효과 | **Fade out** 체크로 켜고 끔, 슬라이더로 시간 조절 (0.1~3초, 기본 300ms) |
 
 ## 확대 보기
 

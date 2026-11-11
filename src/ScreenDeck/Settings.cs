@@ -9,6 +9,8 @@ namespace ScreenDeck
     {
         public string? ControlMonitorDevice { get; set; }
         public bool MaximizeOnMove { get; set; } = true;
+        public bool FadeOnMove { get; set; } = true;
+        public int FadeDurationMs { get; set; } = FadeOverlay.DefaultDurationMs;
         public Dictionary<string, string> MonitorNames { get; set; } = new();   // DeviceName → custom name
 
         private static string FilePath => Path.Combine(
@@ -20,7 +22,11 @@ namespace ScreenDeck
             try
             {
                 if (File.Exists(FilePath))
-                    return JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new Settings();
+                {
+                    var s = JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new Settings();
+                    s.FadeDurationMs = Math.Clamp(s.FadeDurationMs, FadeOverlay.MinDurationMs, FadeOverlay.MaxDurationMs);
+                    return s;
+                }
             }
             catch { }
             return new Settings();

@@ -101,6 +101,14 @@
           <CheckBox x:Name="MaximizeCheck" IsChecked="True" Foreground="{StaticResource Fg}"
                     VerticalAlignment="Center" Margin="0,0,18,0" Checked="Option_Changed" Unchecked="Option_Changed"
                     Content="Maximize after move"/>
+          <CheckBox x:Name="FadeCheck" IsChecked="True" Foreground="{StaticResource Fg}"
+                    VerticalAlignment="Center" Margin="0,0,8,0" Checked="Option_Changed" Unchecked="Option_Changed"
+                    Content="Fade out" ToolTip="Fade out the program on its old monitor when it moves"/>
+          <Slider x:Name="FadeSlider" Width="90" VerticalAlignment="Center" Minimum="100" Maximum="3000"
+                  Value="300" SmallChange="50" LargeChange="250" TickFrequency="50" IsSnapToTickEnabled="True"
+                  ToolTip="Fade-out time (0.1–3 s)" ValueChanged="FadeSlider_ValueChanged"/>
+          <TextBlock x:Name="FadeText" Text="300 ms" Foreground="{StaticResource FgDim}" Width="54"
+                     VerticalAlignment="Center" Margin="6,0,18,0"/>
           <TextBlock Text="Control monitor" Foreground="{StaticResource FgDim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
           <ComboBox x:Name="ControlCombo" Width="220" Margin="0,0,10,0" SelectionChanged="ControlCombo_SelectionChanged"/>
           <Button Style="{StaticResource FlatButton}" Content="Refresh" Click="Refresh_Click"/>

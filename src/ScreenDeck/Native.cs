@@ -151,6 +151,17 @@ namespace ScreenDeck
         [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
         public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
 
+        // ── Fade overlay ──
+
+        public const long WS_EX_TRANSPARENT = 0x00000020L;
+        public const long WS_EX_LAYERED = 0x00080000L;
+        public const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
+        public const int WM_DPICHANGED = 0x02E0;
+        public static readonly IntPtr HWND_TOPMOST = new(-1);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+
         // ── Screen capture (GDI) ──
 
         public const uint SRCCOPY = 0x00CC0020;
