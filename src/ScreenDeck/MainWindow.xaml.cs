@@ -491,7 +491,7 @@ namespace ScreenDeck
                 if (_liveView.Monitor.DeviceName == m.DeviceName) { _liveView.WindowState = WindowState.Maximized; return; }
                 _liveView.Close();
             }
-            _liveView = new LiveViewWindow(m, host) { Owner = this };
+            _liveView = new LiveViewWindow(m, host, _settings) { Owner = this };
             _liveView.Closed += (s, _) =>
             {
                 if (_liveView != s) return;

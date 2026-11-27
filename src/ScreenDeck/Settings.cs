@@ -11,6 +11,7 @@ namespace ScreenDeck
         public bool MaximizeOnMove { get; set; } = true;
         public bool FadeOnMove { get; set; } = true;
         public int FadeDurationMs { get; set; } = FadeOverlay.DefaultDurationMs;
+        public bool GpuCapture { get; set; }   // live view: DXGI Desktop Duplication instead of GDI (opt-in for now)
         // MonitorInfo.SettingsKey → custom name. Older versions keyed by DeviceName; such entries are moved to
         // the stable key the first time their monitor is seen.
         public Dictionary<string, string> MonitorNames { get; set; } = new();
