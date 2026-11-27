@@ -23,18 +23,21 @@ namespace ScreenDeck
 
         private readonly MonitorInfo _monitor;
         private readonly MonitorInfo _host;
-        private readonly MonitorStream? _stream;   // null in demo mode
+        private readonly Settings _settings;
+        private MonitorStream? _stream;   // null in demo mode
         private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(1) };
         private WriteableBitmap? _bitmap;
         private Point? _downPoint;
         private MouseButtonKind _downButton;
         private bool _injecting;                   // a drag is being replayed on a background thread
 
-        public LiveViewWindow(MonitorInfo monitor, MonitorInfo host)
+        public LiveViewWindow(MonitorInfo monitor, MonitorInfo host, Settings settings)
         {
             InitializeComponent();
             _monitor = monitor;
             _host = host;
+            _settings = settings;
+            GpuCheck.IsChecked = settings.GpuCapture;   // before the stream exists: GpuCheck_Changed ignores this
             Title = $"{monitor.DisplayName} Live View - ScreenDeck";
             MonitorText.Text = monitor.DisplayName;
 
@@ -46,8 +49,8 @@ namespace ScreenDeck
             }
             else
             {
-                _stream = new MonitorStream(monitor.Bounds, fps: 30, OnFrame);
-                _statusTimer.Tick += (_, _) => FpsText.Text = $"{_stream.Fps:0} fps · {size}";
+                StartStream();
+                _statusTimer.Tick += (_, _) => FpsText.Text = StatusLine(size);
                 _statusTimer.Start();
             }
 
@@ -67,6 +70,32 @@ namespace ScreenDeck
         }
 
         public MonitorInfo Monitor => _monitor;
+
+        private void StartStream()
+        {
+            _stream?.Dispose();
+            _stream = new MonitorStream(_monitor, fps: 30, useGpu: _settings.GpuCapture, OnFrame);
+            UpdatePaused();
+        }
+
+        private string StatusLine(string size)
+        {
+            if (_stream == null) return size;
+            string line = $"{_stream.Fps:0} fps · {size}";
+            if (_stream.UsingGpu) return line + " · GPU (updates on change)";
+            if (_settings.GpuCapture && _stream.GpuError != null) return line + $" · GPU unavailable: {_stream.GpuError}";
+            return line;
+        }
+
+        private void GpuCheck_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_stream == null) return;   // demo mode, or still in the constructor
+            bool on = GpuCheck.IsChecked == true;
+            if (on == _settings.GpuCapture) return;
+            _settings.GpuCapture = on;
+            _settings.Save();
+            StartStream();
+        }
 
         private void UpdatePaused()
         {

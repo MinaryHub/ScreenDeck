@@ -42,6 +42,7 @@ ScreenDeck is a Windows app for multi-monitor setups. Keep one screen as your **
 - Shows the monitor at about 30 frames per second.
 - Each click briefly moves the mouse pointer to the target monitor and back, since Windows has only one pointer.
 - Uncheck **Mouse & keyboard control** for view only.
+- **GPU capture** (experimental, off by default) reads the monitor through the GPU and only updates when something changes, which uses much less CPU. If it isn't available on your PC, the live view quietly uses the standard capture.
 - Hover effects and tooltips don't appear in the live view. A drag is replayed when you release the button.
 
 ## Limitations
@@ -122,6 +123,7 @@ ScreenDeck은 여러 모니터를 쓰는 Windows 환경을 위한 앱입니다. 
 - 모니터 화면을 초당 약 30프레임으로 보여 줍니다.
 - Windows에는 마우스 포인터가 하나뿐이라, 클릭할 때마다 포인터가 대상 모니터로 아주 잠깐 갔다가 돌아옵니다.
 - 보기만 하려면 **Mouse & keyboard control** 체크를 끕니다.
+- **GPU capture**(실험 기능, 기본 꺼짐)를 켜면 GPU로 화면을 읽고 화면이 바뀔 때만 갱신해 CPU를 훨씬 적게 씁니다. PC에서 지원되지 않으면 자동으로 기존 방식으로 캡처합니다.
 - 마우스를 올렸을 때의 강조 표시나 툴팁은 보이지 않습니다. 드래그는 버튼을 놓을 때 한 번에 재현됩니다.
 
 ## 제한 사항
