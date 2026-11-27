@@ -48,6 +48,8 @@ namespace ScreenDeck
         public const int GWL_STYLE = -16;
         public const int GWL_EXSTYLE = -20;
         public const long WS_CHILD = 0x40000000L;
+        public const long WS_CAPTION = 0x00C00000L;       // WS_BORDER | WS_DLGFRAME
+        public const long WS_MAXIMIZEBOX = 0x00010000L;
         public const long WS_EX_TOOLWINDOW = 0x00000080L;
         public const long WS_EX_APPWINDOW = 0x00040000L;
         public const long WS_EX_NOACTIVATE = 0x08000000L;
@@ -119,9 +121,6 @@ namespace ScreenDeck
 
         [DllImport("user32.dll")]
         public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT wp);
-
-        [DllImport("user32.dll")]
-        public static extern bool SetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT wp);
 
         [DllImport("user32.dll")]
         public static extern bool ShowWindow(IntPtr hWnd, int cmd);
@@ -199,6 +198,17 @@ namespace ScreenDeck
 
         [DllImport("gdi32.dll")]
         public static extern bool GdiFlush();
+
+        public const int HALFTONE = 4;
+
+        [DllImport("gdi32.dll")]
+        public static extern bool StretchBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, int sw, int sh, uint rop);
+
+        [DllImport("gdi32.dll")]
+        public static extern int SetStretchBltMode(IntPtr hdc, int mode);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool SetBrushOrgEx(IntPtr hdc, int x, int y, IntPtr prev);
 
         // ── Input injection ──
 

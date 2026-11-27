@@ -42,10 +42,14 @@ namespace ScreenDeck
         }
 
         /// <summary>Top-level, user-visible application windows in Z-order (topmost first).</summary>
+        // Process paths by PID, kept between refreshes. Entries of PIDs that no longer own a listed window are
+        // dropped on every refresh, so a reused PID can't inherit a stale path. Used from the UI thread only.
+        private static readonly Dictionary<uint, string?> PathCache = new();
+
         public static List<WindowInfo> GetWindows(uint excludePid)
         {
             var list = new List<WindowInfo>();
-            var pathCache = new Dictionary<uint, string?>();
+            var seenPids = new HashSet<uint>();
 
             EnumWindows((hWnd, _) =>
             {
@@ -53,8 +57,9 @@ namespace ScreenDeck
                 GetWindowThreadProcessId(hWnd, out uint pid);
                 if (pid == excludePid) return true;
 
-                if (!pathCache.TryGetValue(pid, out string? path))
-                    pathCache[pid] = path = NativeProcess.GetProcessPath(pid);
+                seenPids.Add(pid);
+                if (!PathCache.TryGetValue(pid, out string? path))
+                    PathCache[pid] = path = NativeProcess.GetProcessPath(pid);
 
                 list.Add(new WindowInfo
                 {
@@ -71,6 +76,7 @@ namespace ScreenDeck
                 return true;
             }, IntPtr.Zero);
 
+            foreach (uint gone in PathCache.Keys.Where(p => !seenPids.Contains(p)).ToList()) PathCache.Remove(gone);
             return list;
         }
 
@@ -115,14 +121,12 @@ namespace ScreenDeck
 
             bool wasMinimized = IsIconic(hWnd);
             bool wasMaximized = IsZoomed(hWnd);
+            long style = GetWindowLongPtr(hWnd, GWL_STYLE).ToInt64();
 
-            // Normal (restored) rectangle, so we know the size the window will have when un-maximized.
-            var wp = new WINDOWPLACEMENT { length = Marshal.SizeOf<WINDOWPLACEMENT>() };
-            GetWindowPlacement(hWnd, ref wp);
-
-            // Borderless full-screen: window rect covers the whole source monitor but it's not "maximized".
+            // Borderless full-screen: no title bar, and the window rect covers the whole source monitor without
+            // being "maximized". (A normal window just dragged larger than the monitor still has its caption.)
             GetWindowRect(hWnd, out RECT cur);
-            bool borderlessFullscreen = !wasMinimized && !wasMaximized &&
+            bool borderlessFullscreen = !wasMinimized && !wasMaximized && (style & WS_CAPTION) != WS_CAPTION &&
                 cur.Left <= source.Bounds.X && cur.Top <= source.Bounds.Y &&
                 cur.Right >= source.Bounds.X + source.Bounds.Width &&
                 cur.Bottom >= source.Bounds.Y + source.Bounds.Height;
@@ -159,11 +163,13 @@ namespace ScreenDeck
             ok = SetWindowPos(hWnd, IntPtr.Zero /* HWND_TOP */, x, y, w, h, SWP_NOACTIVATE);
             if (!ok) return Result(false, hWnd);
 
-            if (maximize)
+            // Fixed-size windows (dialogs, tool windows) have no maximize box: keep their size instead of stretching them.
+            bool canMaximize = (style & WS_MAXIMIZEBOX) != 0;
+            if (maximize && (canMaximize || wasMaximized))
                 ShowWindow(hWnd, SW_MAXIMIZE);
             else if (wasMaximized)
                 ShowWindow(hWnd, SW_MAXIMIZE);
-            else if (wasMinimized)
+            else if (wasMinimized && !maximize)
                 ShowWindow(hWnd, SW_SHOWMINIMIZED);
 
             return MoveResult.Ok;

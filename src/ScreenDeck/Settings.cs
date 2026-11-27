@@ -24,6 +24,7 @@ namespace ScreenDeck
                 if (File.Exists(FilePath))
                 {
                     var s = JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new Settings();
+                    s.MonitorNames ??= new();   // "MonitorNames": null in a hand-edited file
                     s.FadeDurationMs = Math.Clamp(s.FadeDurationMs, FadeOverlay.MinDurationMs, FadeOverlay.MaxDurationMs);
                     return s;
                 }
@@ -38,7 +39,10 @@ namespace ScreenDeck
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-                File.WriteAllText(FilePath, JsonSerializer.Serialize(this));
+                // Write a temp file and swap it in, so a crash mid-write can't leave a truncated settings file.
+                string tmp = FilePath + ".tmp";
+                File.WriteAllText(tmp, JsonSerializer.Serialize(this));
+                File.Move(tmp, FilePath, overwrite: true);
             }
             catch { }
         }
