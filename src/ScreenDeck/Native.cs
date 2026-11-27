@@ -60,6 +60,7 @@ namespace ScreenDeck
         public const int SW_SHOWNORMAL = 1;
         public const int SW_SHOWMINIMIZED = 2;
 
+        public const uint SWP_NOSIZE = 0x0001;
         public const uint SWP_NOZORDER = 0x0004;
         public const uint SWP_NOACTIVATE = 0x0010;
         public const uint SWP_FRAMECHANGED = 0x0020;
@@ -79,6 +80,23 @@ namespace ScreenDeck
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX info);
+
+        public const uint EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001;
+        public const uint DISPLAY_DEVICE_ACTIVE = 0x00000001;
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct DISPLAY_DEVICE
+        {
+            public int cb;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+            public uint StateFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern bool EnumDisplayDevices(string? device, uint index, ref DISPLAY_DEVICE dd, uint flags);
 
         [DllImport("user32.dll")]
         public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
@@ -155,11 +173,36 @@ namespace ScreenDeck
         public const long WS_EX_TRANSPARENT = 0x00000020L;
         public const long WS_EX_LAYERED = 0x00080000L;
         public const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
-        public const int WM_DPICHANGED = 0x02E0;
-        public static readonly IntPtr HWND_TOPMOST = new(-1);
 
         [DllImport("user32.dll")]
         public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+
+        public const uint ULW_ALPHA = 0x00000002;
+        public const byte AC_SRC_OVER = 0x00, AC_SRC_ALPHA = 0x01;
+        public const long WS_EX_TOPMOST = 0x00000008L;
+        public const int WS_POPUP = unchecked((int)0x80000000);
+        public const int SW_SHOWNOACTIVATE = 4;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct SIZE { public int cx, cy; }
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        public struct BLENDFUNCTION
+        {
+            public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool UpdateLayeredWindow(IntPtr hWnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize,
+            IntPtr hdcSrc, ref POINT pptSrc, uint crKey, ref BLENDFUNCTION pblend, uint flags);
+
+        /// <summary>Changes only the constant alpha of a layered window that already has content.</summary>
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool UpdateLayeredWindow(IntPtr hWnd, IntPtr hdcDst, IntPtr pptDst, IntPtr psize,
+            IntPtr hdcSrc, IntPtr pptSrc, uint crKey, ref BLENDFUNCTION pblend, uint flags);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmFlush();
 
         // ── Screen capture (GDI) ──
 

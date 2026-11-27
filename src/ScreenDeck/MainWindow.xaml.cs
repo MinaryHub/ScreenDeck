@@ -146,7 +146,9 @@ namespace ScreenDeck
         {
             _monitors = LoadMonitors();
             if (DemoData.Enabled) { DemoData.SizeForScreenshot(this); return; }
-            var control =_monitors.FirstOrDefault(m => m.DeviceName == _settings.ControlMonitorDevice)
+            // Saved by stable ID; settings from older versions hold the \\.\DISPLAYn name.
+            var control = _monitors.FirstOrDefault(m => m.SettingsKey == _settings.ControlMonitorDevice)
+                          ?? _monitors.FirstOrDefault(m => m.DeviceName == _settings.ControlMonitorDevice)
                           ?? _monitors.FirstOrDefault(m => m.IsPrimary) ?? _monitors.FirstOrDefault();
             if (control != null) PlaceSelfOn(control);
         }
@@ -167,7 +169,17 @@ namespace ScreenDeck
             if (DemoData.Enabled) return DemoData.Monitors;
             var monitors = WindowManager.GetMonitors();
             foreach (var m in monitors)
-                if (_settings.MonitorNames.TryGetValue(m.DeviceName, out var name)) m.CustomName = name;
+            {
+                if (_settings.MonitorNames.TryGetValue(m.SettingsKey, out var name)) m.CustomName = name;
+                else if (m.SettingsKey != m.DeviceName && _settings.MonitorNames.TryGetValue(m.DeviceName, out name))
+                {
+                    // Saved by an older version under \\.\DISPLAYn: move it to the stable key.
+                    m.CustomName = name;
+                    _settings.MonitorNames.Remove(m.DeviceName);
+                    _settings.MonitorNames[m.SettingsKey] = name;
+                    SaveSettingsSoon();
+                }
+            }
             return monitors;
         }
 
@@ -214,9 +226,9 @@ namespace ScreenDeck
                 ControlCombo.SelectedItem = _monitors.FirstOrDefault(m => m.DeviceName == _controlDevice);
                 _suppressComboEvent = false;
                 // ScreenDeck was moved by hand: remember the new control monitor for the next start.
-                if (!DemoData.Enabled && _settings.ControlMonitorDevice != _controlDevice)
+                if (!DemoData.Enabled && _settings.ControlMonitorDevice != self.SettingsKey)
                 {
-                    _settings.ControlMonitorDevice = _controlDevice;
+                    _settings.ControlMonitorDevice = self.SettingsKey;
                     SaveSettingsSoon();
                 }
             }
@@ -451,8 +463,9 @@ namespace ScreenDeck
             if (name == m.CustomName) return;
 
             m.CustomName = name;
-            if (name == null) _settings.MonitorNames.Remove(m.DeviceName);
-            else _settings.MonitorNames[m.DeviceName] = name;
+            _settings.MonitorNames.Remove(m.DeviceName);   // entry of an older version, if any
+            if (name == null) _settings.MonitorNames.Remove(m.SettingsKey);
+            else _settings.MonitorNames[m.SettingsKey] = name;
             _settings.Save();
 
             _suppressComboEvent = true;
@@ -668,7 +681,7 @@ namespace ScreenDeck
                 catch { ghost?.Close(); ghost = null; }
             }
 
-            var result = WindowManager.MoveToMonitor(w.Handle, source, target, maximize);
+            var result = WindowManager.MoveToMonitor(w.Handle, source, target, maximize, out bool maximized);
             if (ghost != null)
             {
                 if (result == MoveResult.Ok) ghost.FadeOut(_settings.FadeDurationMs);
@@ -676,7 +689,7 @@ namespace ScreenDeck
             }
             StatusText.Text = result switch
             {
-                MoveResult.Ok => $"'{w.Title}' → {target.DisplayName}" + (maximize ? " (maximized)" : ""),
+                MoveResult.Ok => $"'{w.Title}' → {target.DisplayName}" + (maximized ? " (maximized)" : ""),
                 MoveResult.AccessDenied => $"'{w.Title}' runs as administrator and can't be moved. Run ScreenDeck as administrator.",
                 MoveResult.Gone => "The program has already closed.",
                 _ => $"Couldn't move '{w.Title}'.",
@@ -758,7 +771,7 @@ namespace ScreenDeck
             WindowManager.MoveToMonitor(me, source, target, maximize: true);
             WindowState = WindowState.Maximized;
             _controlDevice = target.DeviceName;
-            _settings.ControlMonitorDevice = target.DeviceName;
+            _settings.ControlMonitorDevice = target.SettingsKey;
             _settings.Save();
             if (_selectedDevice == _controlDevice)
                 _selectedDevice = _monitors.FirstOrDefault(x => x.DeviceName != _controlDevice)?.DeviceName ?? _selectedDevice;
