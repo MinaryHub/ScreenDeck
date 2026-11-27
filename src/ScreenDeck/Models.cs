@@ -8,12 +8,16 @@ namespace ScreenDeck
     {
         public IntPtr Handle { get; init; }
         public int Index { get; init; }              // 1-based, ordered left-to-right
-        public string DeviceName { get; init; } = "";
+        public string DeviceName { get; init; } = "";   // \\.\DISPLAYn: can change after a reboot or reconnect
+        public string StableId { get; init; } = "";     // monitor device interface path (EDID-based); "" if unknown
         public Int32Rect Bounds { get; init; }       // physical pixels, virtual-screen coords
         public Int32Rect WorkArea { get; init; }
         public bool IsPrimary { get; init; }
 
         public string? CustomName { get; set; }      // user-assigned, persisted in Settings.MonitorNames
+
+        /// <summary>Key the monitor is remembered by in the settings: the stable ID when known.</summary>
+        public string SettingsKey => string.IsNullOrEmpty(StableId) ? DeviceName : StableId;
 
         public string DefaultName => $"Monitor {Index}";
         public string DisplayName => string.IsNullOrWhiteSpace(CustomName) ? DefaultName : CustomName;

@@ -1,11 +1,8 @@
 using System;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Interop;
-using System.Windows.Media;
-using System.Windows.Media.Animation;
-using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using static ScreenDeck.Native;
 
 namespace ScreenDeck
@@ -15,36 +12,25 @@ namespace ScreenDeck
     /// its old position and faded out. The real window is never touched, so this works for every program
     /// (elevated, GPU-rendered, games). The ghost is click-through, never takes focus and is excluded from
     /// screen capture, so ScreenDeck's own previews don't show it.
+    /// <para>
+    /// The ghost is a plain Win32 layered window. Its pixels are handed to the system once
+    /// (UpdateLayeredWindow); the fade only changes the window's constant alpha, which DWM applies on the GPU.
+    /// (A WPF window with AllowsTransparency re-renders and re-uploads the whole bitmap in software on every
+    /// animation frame, which is slow for a full-screen 4K window.)
+    /// </para>
     /// </summary>
-    internal sealed class FadeOverlay : Window
+    internal sealed class FadeOverlay
     {
         public const int MinDurationMs = 100;
         public const int MaxDurationMs = 3000;
         public const int DefaultDurationMs = 300;
 
         private readonly Int32Rect _bounds;   // physical pixels
-        private readonly TaskCompletionSource _rendered = new();
+        private readonly System.Windows.Forms.NativeWindow _window = new();
+        private DispatcherTimer? _fadeTimer;
+        private bool _closed;
 
-        private FadeOverlay(BitmapSource snapshot, Int32Rect bounds)
-        {
-            _bounds = bounds;
-            WindowStyle = WindowStyle.None;
-            ResizeMode = ResizeMode.NoResize;
-            AllowsTransparency = true;          // required for Window.Opacity to work
-            Background = Brushes.Transparent;
-            ShowInTaskbar = false;
-            ShowActivated = false;
-            Topmost = true;
-            Focusable = false;
-            IsHitTestVisible = false;
-            Title = "ScreenDeck fade";
-            Content = new Image { Source = snapshot, Stretch = Stretch.Fill };
-            RenderOptions.SetBitmapScalingMode((Image)Content, BitmapScalingMode.NearestNeighbor);
-
-            SourceInitialized += (_, _) => OnSourceInitialized();
-            Loaded += (_, _) => PlaceOnScreen();
-            ContentRendered += (_, _) => _rendered.TrySetResult();
-        }
+        private FadeOverlay(Int32Rect bounds) => _bounds = bounds;
 
         /// <summary>
         /// Captures the visible part of <paramref name="hWnd"/> on <paramref name="source"/> and shows its ghost.
@@ -57,51 +43,109 @@ namespace ScreenDeck
             var b = Intersect(WindowManager.GetVisualBounds(hWnd), source.Bounds);
             if (b.Width <= 0 || b.Height <= 0) return null;
 
-            var snapshot = ScreenCapture.Capture(b, b.Width);
-            if (snapshot == null) return null;
-
-            var overlay = new FadeOverlay(snapshot, b);
-            try { overlay.Show(); }
-            catch { overlay.Close(); return null; }
-            return overlay;
+            var overlay = new FadeOverlay(b);
+            try
+            {
+                if (overlay.Create()) return overlay;
+            }
+            catch { }
+            overlay.Close();
+            return null;
         }
 
-        /// <summary>Completes once the ghost is on screen (or after a short timeout), so the real window can move without a visible gap.</summary>
-        public Task WaitUntilVisibleAsync() => Task.WhenAny(_rendered.Task, Task.Delay(150));
+        private bool Create()
+        {
+            _window.CreateHandle(new System.Windows.Forms.CreateParams
+            {
+                Caption = "ScreenDeck fade",
+                X = _bounds.X, Y = _bounds.Y, Width = _bounds.Width, Height = _bounds.Height,
+                Style = WS_POPUP,
+                ExStyle = (int)(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST),
+            });
+            IntPtr hwnd = _window.Handle;
+            if (hwnd == IntPtr.Zero) return false;
+            SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);   // Windows 10 2004+; ignored if unsupported
+
+            if (!SetSnapshot(hwnd)) return false;
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            return true;
+        }
+
+        /// <summary>Copies the screen pixels under the ghost into the layered window, fully opaque.</summary>
+        private bool SetSnapshot(IntPtr hwnd)
+        {
+            int w = _bounds.Width, h = _bounds.Height;
+            IntPtr screen = GetDC(IntPtr.Zero);
+            if (screen == IntPtr.Zero) return false;
+            IntPtr mem = IntPtr.Zero, dib = IntPtr.Zero, old = IntPtr.Zero;
+            try
+            {
+                mem = CreateCompatibleDC(screen);
+                if (mem == IntPtr.Zero) return false;
+                var bmi = new BITMAPINFOHEADER
+                {
+                    biSize = System.Runtime.InteropServices.Marshal.SizeOf<BITMAPINFOHEADER>(),
+                    biWidth = w, biHeight = -h, biPlanes = 1, biBitCount = 32,
+                };
+                dib = CreateDIBSection(mem, ref bmi, DIB_RGB_COLORS, out _, IntPtr.Zero, 0);
+                if (dib == IntPtr.Zero) return false;
+                old = SelectObject(mem, dib);
+
+                // Secure desktop / UAC prompt / locked workstation: nothing to show.
+                if (!BitBlt(mem, 0, 0, w, h, screen, _bounds.X, _bounds.Y, SRCCOPY)) return false;
+                GdiFlush();
+
+                // AlphaFormat 0: per-pixel alpha is ignored (BitBlt leaves it 0), only the constant alpha applies.
+                var dst = new POINT { X = _bounds.X, Y = _bounds.Y };
+                var size = new SIZE { cx = w, cy = h };
+                var src = new POINT();
+                var blend = Blend(255);
+                return UpdateLayeredWindow(hwnd, screen, ref dst, ref size, mem, ref src, 0, ref blend, ULW_ALPHA);
+            }
+            finally
+            {
+                // The system keeps its own copy of the pixels; ours can go right away.
+                if (old != IntPtr.Zero) SelectObject(mem, old);
+                if (dib != IntPtr.Zero) DeleteObject(dib);
+                if (mem != IntPtr.Zero) DeleteDC(mem);
+                ReleaseDC(IntPtr.Zero, screen);
+            }
+        }
+
+        private static BLENDFUNCTION Blend(byte alpha) =>
+            new() { BlendOp = AC_SRC_OVER, BlendFlags = 0, SourceConstantAlpha = alpha, AlphaFormat = 0 };
+
+        /// <summary>
+        /// Completes once the ghost has been composed on screen (or after a short timeout), so the real window
+        /// can move without a visible gap.
+        /// </summary>
+        public Task WaitUntilVisibleAsync() =>
+            Task.WhenAny(Task.Run(() => { DwmFlush(); DwmFlush(); }), Task.Delay(150));
 
         public void FadeOut(int durationMs)
         {
+            if (_closed) return;
             durationMs = Math.Clamp(durationMs, MinDurationMs, MaxDurationMs);
-            var anim = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(durationMs))
+            var clock = Stopwatch.StartNew();
+            _fadeTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(15) };
+            _fadeTimer.Tick += (_, _) =>
             {
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
+                double t = clock.Elapsed.TotalMilliseconds / durationMs;
+                if (t >= 1 || _window.Handle == IntPtr.Zero) { Close(); return; }
+                // Quadratic ease-in from opaque to transparent, as before.
+                var blend = Blend((byte)Math.Round(255 * (1 - t * t)));
+                UpdateLayeredWindow(_window.Handle, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
+                    0, ref blend, ULW_ALPHA);
             };
-            anim.Completed += (_, _) => Close();
-            BeginAnimation(OpacityProperty, anim);
+            _fadeTimer.Start();
         }
 
-        private void OnSourceInitialized()
+        public void Close()
         {
-            var hwnd = new WindowInteropHelper(this).Handle;
-            long ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
-            ex |= WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
-            SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(ex));
-            SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);   // Windows 10 2004+; ignored if unsupported
-
-            // Keep our exact pixel rectangle even when the ghost sits on a monitor with a different DPI.
-            HwndSource.FromHwnd(hwnd)?.AddHook((IntPtr h, int msg, IntPtr w, IntPtr l, ref bool handled) =>
-            {
-                if (msg == WM_DPICHANGED) handled = true;
-                return IntPtr.Zero;
-            });
-            PlaceOnScreen();
-        }
-
-        private void PlaceOnScreen()
-        {
-            var hwnd = new WindowInteropHelper(this).Handle;
-            if (hwnd == IntPtr.Zero) return;
-            SetWindowPos(hwnd, HWND_TOPMOST, _bounds.X, _bounds.Y, _bounds.Width, _bounds.Height, SWP_NOACTIVATE);
+            if (_closed) return;
+            _closed = true;
+            _fadeTimer?.Stop();
+            if (_window.Handle != IntPtr.Zero) _window.DestroyHandle();
         }
 
         private static Int32Rect Intersect(Int32Rect a, Int32Rect b)

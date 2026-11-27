@@ -34,11 +34,33 @@ namespace ScreenDeck
                     Handle = m.h,
                     Index = i + 1,
                     DeviceName = m.mi.szDevice,
+                    StableId = GetMonitorDeviceId(m.mi.szDevice),
                     Bounds = ToRect(m.mi.rcMonitor),
                     WorkArea = ToRect(m.mi.rcWork),
                     IsPrimary = (m.mi.dwFlags & MONITORINFOF_PRIMARY) != 0,
                 })
                 .ToList();
+        }
+
+        /// <summary>
+        /// Device interface path of the monitor shown on a display output, e.g.
+        /// <c>\\?\DISPLAY#DEL4100#5&amp;...#{e6f07b5f-...}</c>. Unlike <c>\\.\DISPLAYn</c> it names the physical monitor
+        /// (from its EDID) on its connector, so it survives reboots and other monitors being plugged in or out.
+        /// </summary>
+        private static string GetMonitorDeviceId(string outputDevice)
+        {
+            try
+            {
+                for (uint i = 0; ; i++)
+                {
+                    var dd = new DISPLAY_DEVICE { cb = Marshal.SizeOf<DISPLAY_DEVICE>() };
+                    if (!EnumDisplayDevices(outputDevice, i, ref dd, EDD_GET_DEVICE_INTERFACE_NAME)) break;
+                    if ((dd.StateFlags & DISPLAY_DEVICE_ACTIVE) != 0 && !string.IsNullOrEmpty(dd.DeviceID))
+                        return dd.DeviceID;
+                }
+            }
+            catch { }
+            return "";
         }
 
         /// <summary>Top-level, user-visible application windows in Z-order (topmost first).</summary>
@@ -115,8 +137,14 @@ namespace ScreenDeck
         /// maximized there; borderless full-screen windows (video players, games) are stretched to fill
         /// the target monitor. Otherwise the window keeps its relative position and size.
         /// </summary>
-        public static MoveResult MoveToMonitor(IntPtr hWnd, MonitorInfo source, MonitorInfo target, bool maximize)
+        public static MoveResult MoveToMonitor(IntPtr hWnd, MonitorInfo source, MonitorInfo target, bool maximize) =>
+            MoveToMonitor(hWnd, source, target, maximize, out _);
+
+        /// <param name="maximized">Whether the window ends up maximized (fixed-size windows are not).</param>
+        public static MoveResult MoveToMonitor(IntPtr hWnd, MonitorInfo source, MonitorInfo target, bool maximize,
+            out bool maximized)
         {
+            maximized = false;
             if (!IsWindow(hWnd)) return MoveResult.Gone;
 
             bool wasMinimized = IsIconic(hWnd);
@@ -163,11 +191,23 @@ namespace ScreenDeck
             ok = SetWindowPos(hWnd, IntPtr.Zero /* HWND_TOP */, x, y, w, h, SWP_NOACTIVATE);
             if (!ok) return Result(false, hWnd);
 
+            // A per-monitor DPI aware program rescales itself (WM_DPICHANGED) when it lands on a monitor with a
+            // different DPI, which shifts it away from the spot computed above and can push it past the work area.
+            // Keep the size it chose (capped to the work area) and place that at the same relative position.
+            if (GetWindowRect(hWnd, out RECT placed) && (placed.Width != w || placed.Height != h))
+            {
+                int w2 = Math.Min(placed.Width, tw.Width), h2 = Math.Min(placed.Height, tw.Height);
+                int x2 = tw.X + (int)Math.Round((tw.Width - w2) * rx);
+                int y2 = tw.Y + (int)Math.Round((tw.Height - h2) * ry);
+                uint flags = SWP_NOACTIVATE | SWP_NOZORDER;
+                if (w2 == placed.Width && h2 == placed.Height) flags |= SWP_NOSIZE;
+                SetWindowPos(hWnd, IntPtr.Zero, x2, y2, w2, h2, flags);
+            }
+
             // Fixed-size windows (dialogs, tool windows) have no maximize box: keep their size instead of stretching them.
             bool canMaximize = (style & WS_MAXIMIZEBOX) != 0;
-            if (maximize && (canMaximize || wasMaximized))
-                ShowWindow(hWnd, SW_MAXIMIZE);
-            else if (wasMaximized)
+            maximized = wasMaximized || (maximize && canMaximize);
+            if (maximized)
                 ShowWindow(hWnd, SW_MAXIMIZE);
             else if (wasMinimized && !maximize)
                 ShowWindow(hWnd, SW_SHOWMINIMIZED);
