@@ -28,6 +28,7 @@ namespace ScreenDeck
         private WriteableBitmap? _bitmap;
         private Point? _downPoint;
         private MouseButtonKind _downButton;
+        private bool _injecting;                   // a drag is being replayed on a background thread
 
         public LiveViewWindow(MonitorInfo monitor, MonitorInfo host)
         {
@@ -51,7 +52,11 @@ namespace ScreenDeck
             }
 
             SourceInitialized += (_, _) => OnSourceInitialized();
-            StateChanged += (_, _) => { if (_stream != null) _stream.Paused = WindowState == WindowState.Minimized; };
+            // Stop capturing while nothing is shown: minimized, or hidden because the owner was minimized.
+            StateChanged += (_, _) => UpdatePaused();
+            IsVisibleChanged += (_, _) => UpdatePaused();
+            // Capture can be lost without a MouseUp (Alt+Tab, a popup); forget the press so it can't turn into a stale drag.
+            Screen.LostMouseCapture += (_, _) => _downPoint = null;
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             Closed += (_, _) =>
             {
@@ -62,6 +67,11 @@ namespace ScreenDeck
         }
 
         public MonitorInfo Monitor => _monitor;
+
+        private void UpdatePaused()
+        {
+            if (_stream != null) _stream.Paused = WindowState == WindowState.Minimized || !IsVisible;
+        }
 
         private void OnSourceInitialized()
         {
@@ -112,7 +122,7 @@ namespace ScreenDeck
 
         private void Screen_MouseDown(object sender, MouseButtonEventArgs e)
         {
-            if (!Controlling || _downPoint != null) return;
+            if (!Controlling || _injecting || _downPoint != null) return;
             MouseButtonKind? kind = e.ChangedButton switch
             {
                 MouseButton.Left => MouseButtonKind.Left,
@@ -127,12 +137,12 @@ namespace ScreenDeck
             e.Handled = true;
         }
 
-        private void Screen_MouseUp(object sender, MouseButtonEventArgs e)
+        private async void Screen_MouseUp(object sender, MouseButtonEventArgs e)
         {
             if (_downPoint is not Point start) return;
             if (!Matches(e.ChangedButton, _downButton)) return;
             _downPoint = null;
-            Screen.ReleaseMouseCapture();
+            Screen.ReleaseMouseCapture();   // raises LostMouseCapture; _downPoint is already cleared
             e.Handled = true;
 
             Point end = e.GetPosition(Screen);
@@ -149,14 +159,18 @@ namespace ScreenDeck
                 // Clamp the drop point to the image so a drag released outside still ends on the monitor.
                 end = new Point(Math.Clamp(end.X, 0, Screen.ActualWidth - 1), Math.Clamp(end.Y, 0, Screen.ActualHeight - 1));
                 TryMap(end, out int x2, out int y2);
-                InputInjector.Drag(x1, y1, x2, y2, _downButton);
+                var button = _downButton;
+                // The drag is paced over ~100 ms; replay it off the UI thread so the view keeps updating.
+                _injecting = true;
+                try { await System.Threading.Tasks.Task.Run(() => InputInjector.Drag(x1, y1, x2, y2, button)); }
+                finally { _injecting = false; }
                 ShowRipple(end);
             }
         }
 
         private void Screen_MouseWheel(object sender, MouseWheelEventArgs e)
         {
-            if (!Controlling || DemoData.Enabled || !TryMap(e.GetPosition(Screen), out int x, out int y)) return;
+            if (!Controlling || _injecting || DemoData.Enabled || !TryMap(e.GetPosition(Screen), out int x, out int y)) return;
             InputInjector.Wheel(x, y, e.Delta);
             e.Handled = true;
         }

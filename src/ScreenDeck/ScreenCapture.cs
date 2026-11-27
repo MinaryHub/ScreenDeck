@@ -1,52 +1,71 @@
 using System;
-using System.Drawing;
-using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 namespace ScreenDeck
 {
     internal static class ScreenCapture
     {
-        /// <summary>Captures a monitor and returns a frozen, downscaled bitmap (safe to pass across threads).</summary>
+        /// <summary>
+        /// Captures a screen rectangle and returns a frozen bitmap at most <paramref name="maxWidth"/> pixels wide
+        /// (safe to pass across threads). The screen is scaled straight into a small DIB with one GDI StretchBlt,
+        /// so a 4K monitor is never copied at full size just to be shrunk to a thumbnail.
+        /// </summary>
         public static BitmapSource? Capture(Int32Rect bounds, int maxWidth)
         {
             if (bounds.Width <= 0 || bounds.Height <= 0) return null;
+
+            double scale = Math.Min(1.0, maxWidth / (double)bounds.Width);
+            int tw = Math.Max(1, (int)(bounds.Width * scale));
+            int th = Math.Max(1, (int)(bounds.Height * scale));
+            int stride = tw * 4;
+
+            IntPtr screen = Native.GetDC(IntPtr.Zero);
+            if (screen == IntPtr.Zero) return null;
+            IntPtr mem = IntPtr.Zero, dib = IntPtr.Zero, old = IntPtr.Zero;
             try
             {
-                double scale = Math.Min(1.0, maxWidth / (double)bounds.Width);
-                int tw = Math.Max(1, (int)(bounds.Width * scale));
-                int th = Math.Max(1, (int)(bounds.Height * scale));
-
-                using var full = new Bitmap(bounds.Width, bounds.Height, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
-                using (var g = Graphics.FromImage(full))
-                    g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, new System.Drawing.Size(bounds.Width, bounds.Height),
-                        CopyPixelOperation.SourceCopy);
-
-                bool resample = tw != bounds.Width || th != bounds.Height;   // full resolution: use as is
-                using var small = resample ? new Bitmap(tw, th, System.Drawing.Imaging.PixelFormat.Format32bppRgb) : null;
-                if (small != null)
-                    using (var g = Graphics.FromImage(small))
-                    {
-                        g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                        g.DrawImage(full, 0, 0, tw, th);
-                    }
-
-                IntPtr hBmp = (small ?? full).GetHbitmap();
-                try
+                mem = Native.CreateCompatibleDC(screen);
+                if (mem == IntPtr.Zero) return null;
+                var bmi = new Native.BITMAPINFOHEADER
                 {
-                    var src = Imaging.CreateBitmapSourceFromHBitmap(hBmp, IntPtr.Zero, Int32Rect.Empty,
-                        BitmapSizeOptions.FromEmptyOptions());
-                    src.Freeze();
-                    return src;
+                    biSize = Marshal.SizeOf<Native.BITMAPINFOHEADER>(),
+                    biWidth = tw, biHeight = -th, biPlanes = 1, biBitCount = 32, // negative height = top-down rows
+                };
+                dib = Native.CreateDIBSection(mem, ref bmi, Native.DIB_RGB_COLORS, out IntPtr bits, IntPtr.Zero, 0);
+                if (dib == IntPtr.Zero) return null;
+                old = Native.SelectObject(mem, dib);
+
+                bool ok;
+                if (tw == bounds.Width && th == bounds.Height)   // full resolution: plain copy
+                    ok = Native.BitBlt(mem, 0, 0, tw, th, screen, bounds.X, bounds.Y, Native.SRCCOPY);
+                else
+                {
+                    Native.SetStretchBltMode(mem, Native.HALFTONE);   // averages pixels: smooth thumbnails
+                    Native.SetBrushOrgEx(mem, 0, 0, IntPtr.Zero);     // required after selecting HALFTONE
+                    ok = Native.StretchBlt(mem, 0, 0, tw, th, screen, bounds.X, bounds.Y, bounds.Width, bounds.Height,
+                        Native.SRCCOPY);
                 }
-                finally { Native.DeleteObject(hBmp); }
+                if (!ok) return null;   // secure desktop / UAC prompt / locked workstation
+                Native.GdiFlush();
+
+                var src = BitmapSource.Create(tw, th, 96, 96, PixelFormats.Bgr32, null, bits, stride * th, stride);
+                src.Freeze();
+                return src;
             }
             catch
             {
-                return null; // secure desktop / UAC prompt / locked workstation
+                return null;
+            }
+            finally
+            {
+                if (old != IntPtr.Zero) Native.SelectObject(mem, old);
+                if (dib != IntPtr.Zero) Native.DeleteObject(dib);
+                if (mem != IntPtr.Zero) Native.DeleteDC(mem);
+                Native.ReleaseDC(IntPtr.Zero, screen);
             }
         }
     }

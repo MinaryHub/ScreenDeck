@@ -31,15 +31,22 @@ namespace ScreenDeck
             public TextBox NameEditor = null!;
             public TextBlock Count = null!;
             public Border ControlBadge = null!;
+            public Border DropHint = null!;
         }
+
+        /// <summary>Icon lookup result. A missing icon is retried after <see cref="IconRetry"/>, not on every refresh.</summary>
+        private readonly record struct IconEntry(ImageSource? Source, DateTime RetryAt);
+        private static readonly TimeSpan IconRetry = TimeSpan.FromSeconds(10);
 
         private readonly Settings _settings = Settings.Load();
         private readonly uint _ownPid = (uint)Environment.ProcessId;
         private readonly ObservableCollection<WindowInfo> _items = new();
-        private readonly Dictionary<IntPtr, ImageSource?> _iconCache = new();
+        private readonly Dictionary<IntPtr, IconEntry> _iconCache = new();
         private readonly Dictionary<string, ImageSource?> _exeIconCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly DispatcherTimer _windowTimer = new() { Interval = TimeSpan.FromMilliseconds(1000) };
         private readonly DispatcherTimer _captureTimer = new() { Interval = TimeSpan.FromMilliseconds(1200) };
+        private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+        private readonly HashSet<IntPtr> _moving = new();   // windows with a move in progress
 
         private List<MonitorInfo> _monitors = new();
         private List<WindowInfo> _windows = new();
@@ -68,8 +75,10 @@ namespace ScreenDeck
             _loadingOptions = false;
             UpdateFadeControls();
 
-            _windowTimer.Tick += (_, _) => RefreshWindows();
+            _windowTimer.Tick += (_, _) => { if (!IsHidden) RefreshWindows(); };
             _captureTimer.Tick += async (_, _) => await CapturePreviewsAsync();
+            _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); _settings.Save(); };
+            StateChanged += (_, _) => { if (!IsHidden) ResumeAfterHidden(); };
 
             SourceInitialized += (_, _) => OnSourceInitialized();
             Loaded += async (_, _) =>
@@ -86,12 +95,44 @@ namespace ScreenDeck
             Closed += (_, _) =>
             {
                 SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+                _saveTimer.Stop();
                 _settings.Save();
             };
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         }
 
         private IntPtr OwnHandle => new WindowInteropHelper(this).Handle;
+
+        /// <summary>
+        /// Nothing of this window can be seen: it is minimized, or the maximized live view covers it on the
+        /// same monitor. Refreshing and capturing previews would only cost CPU then.
+        /// </summary>
+        private bool IsHidden
+        {
+            get
+            {
+                if (WindowState == WindowState.Minimized) return true;
+                if (DemoData.Enabled || _liveView is not { IsVisible: true, WindowState: WindowState.Maximized } lv) return false;
+                IntPtr lvHandle = new WindowInteropHelper(lv).Handle;
+                return lvHandle != IntPtr.Zero && OwnHandle != IntPtr.Zero &&
+                       Native.MonitorFromWindow(lvHandle, Native.MONITOR_DEFAULTTONEAREST) ==
+                       Native.MonitorFromWindow(OwnHandle, Native.MONITOR_DEFAULTTONEAREST);
+            }
+        }
+
+        /// <summary>Catches up after <see cref="IsHidden"/> skipped refreshes.</summary>
+        private void ResumeAfterHidden()
+        {
+            RefreshWindows();
+            _ = CapturePreviewsAsync();
+        }
+
+        /// <summary>Saves the settings a moment later, so a dragged slider doesn't write the file on every step.</summary>
+        private void SaveSettingsSoon()
+        {
+            _saveTimer.Stop();
+            _saveTimer.Start();
+        }
 
         private MonitorInfo? MonitorArg(string name)
         {
@@ -130,12 +171,17 @@ namespace ScreenDeck
             return monitors;
         }
 
-        private void RefreshMonitors()
+        private static string MonitorSignature(List<MonitorInfo> monitors) =>
+            string.Join("|", monitors.Select(m => $"{m.DeviceName}:{m.Bounds}:{m.WorkArea}"));
+
+        private void RefreshMonitors(List<MonitorInfo>? loaded = null)
         {
-            _monitors = LoadMonitors();
-            string sig = string.Join("|", _monitors.Select(m => $"{m.DeviceName}:{m.Bounds}:{m.WorkArea}"));
+            var monitors = loaded ?? LoadMonitors();
+            string sig = MonitorSignature(monitors);
+            // Unchanged: keep the current objects, which the tiles and the combo box refer to.
             if (sig == _monitorSignature) return;
             _monitorSignature = sig;
+            _monitors = monitors;
 
             _controlDevice = DemoData.Enabled ? DemoData.ControlDevice
                 : MonitorOf(OwnHandle)?.DeviceName ?? _monitors.FirstOrDefault()?.DeviceName;
@@ -156,9 +202,8 @@ namespace ScreenDeck
             if (_isDragging && !force) return;
 
             // Monitor set may change without a DisplaySettingsChanged (e.g. taskbar resize changes work area).
-            var current = DemoData.Enabled ? DemoData.Monitors : WindowManager.GetMonitors();
-            string sig = string.Join("|", current.Select(m => $"{m.DeviceName}:{m.Bounds}:{m.WorkArea}"));
-            if (sig != _monitorSignature) RefreshMonitors();
+            var current = LoadMonitors();
+            if (MonitorSignature(current) != _monitorSignature) RefreshMonitors(current);
 
             // Which monitor hosts ScreenDeck right now = control monitor.
             var self = MonitorOf(OwnHandle);
@@ -168,6 +213,12 @@ namespace ScreenDeck
                 _suppressComboEvent = true;
                 ControlCombo.SelectedItem = _monitors.FirstOrDefault(m => m.DeviceName == _controlDevice);
                 _suppressComboEvent = false;
+                // ScreenDeck was moved by hand: remember the new control monitor for the next start.
+                if (!DemoData.Enabled && _settings.ControlMonitorDevice != _controlDevice)
+                {
+                    _settings.ControlMonitorDevice = _controlDevice;
+                    SaveSettingsSoon();
+                }
             }
 
             if (DemoData.Enabled) _windows = DemoData.Windows;   // icons are built in
@@ -197,7 +248,7 @@ namespace ScreenDeck
             // Avoid flicker: only rebuild when something visible changed.
             bool same = newItems.Count == _items.Count && newItems.Zip(_items).All(p =>
                 p.First.Handle == p.Second.Handle && p.First.Title == p.Second.Title &&
-                p.First.StateText == p.Second.StateText);
+                p.First.StateText == p.Second.StateText && p.First.Icon == p.Second.Icon);
             if (same)
             {
                 // Keep bounds fresh for hover highlight.
@@ -281,9 +332,8 @@ namespace ScreenDeck
                     Child = new TextBlock { Text = "Control", Foreground = Brushes.White, FontSize = 11, FontWeight = FontWeights.SemiBold },
                 };
 
-                var dropHint = new Border
+                tile.DropHint = new Border
                 {
-                    Name = "DropHint",
                     Background = new SolidColorBrush(Color.FromArgb(0x55, 0x38, 0xC1, 0x72)),
                     Visibility = Visibility.Collapsed,
                     Child = new TextBlock
@@ -296,7 +346,7 @@ namespace ScreenDeck
                 var grid = new Grid { Background = new SolidColorBrush(Color.FromRgb(0x0E, 0x10, 0x14)) };
                 grid.Children.Add(tile.Preview);
                 grid.Children.Add(tile.Overlay);
-                grid.Children.Add(dropHint);
+                grid.Children.Add(tile.DropHint);
                 grid.Children.Add(labelBar);
                 grid.Children.Add(tile.ControlBadge);
 
@@ -372,8 +422,7 @@ namespace ScreenDeck
                 int n = _windows.Count(w => w.MonitorHandle == t.Monitor.Handle);
                 t.Count.Text = $"· {t.Monitor.Bounds.Width}×{t.Monitor.Bounds.Height} · {n} program{(n == 1 ? "" : "s")}";
 
-                if (((Grid)t.Root.Child).Children.OfType<Border>().FirstOrDefault(c => c.Name == "DropHint") is { } hint)
-                    hint.Visibility = hover ? Visibility.Visible : Visibility.Collapsed;
+                t.DropHint.Visibility = hover ? Visibility.Visible : Visibility.Collapsed;
             }
         }
 
@@ -430,7 +479,12 @@ namespace ScreenDeck
                 _liveView.Close();
             }
             _liveView = new LiveViewWindow(m, host) { Owner = this };
-            _liveView.Closed += (s, _) => { if (_liveView == s) _liveView = null; };
+            _liveView.Closed += (s, _) =>
+            {
+                if (_liveView != s) return;
+                _liveView = null;
+                if (!IsHidden) ResumeAfterHidden();
+            };
             _liveView.Show();
             StatusText.Text = $"Live view of {m.DisplayName} · Clicks, drags and scrolling go to that monitor";
         }
@@ -444,7 +498,7 @@ namespace ScreenDeck
 
         private async Task CapturePreviewsAsync()
         {
-            if (_capturing || WindowState == WindowState.Minimized) return;
+            if (_capturing || IsHidden) return;
             _capturing = true;
             try
             {
@@ -584,9 +638,16 @@ namespace ScreenDeck
                 return;
             }
 
+            if (!_moving.Add(w.Handle)) return;   // already being moved (e.g. a second key press)
+            try { await MoveWindowCoreAsync(w, target); }
+            finally { _moving.Remove(w.Handle); }
+        }
+
+        private async Task MoveWindowCoreAsync(WindowInfo w, MonitorInfo target)
+        {
             var source = _monitors.FirstOrDefault(m => m.Handle == Native.MonitorFromWindow(w.Handle, Native.MONITOR_DEFAULTTONEAREST))
                          ?? _monitors.FirstOrDefault(m => m.Handle == w.MonitorHandle);
-            if (source == null) { RefreshAll(); return; }
+            if (source == null) { _monitorSignature = ""; RefreshAll(); return; }
 
             bool maximize = MaximizeCheck.IsChecked == true;
             if (source.Handle == target.Handle && !maximize)
@@ -629,8 +690,12 @@ namespace ScreenDeck
 
         private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.OriginalSource is TextBox) return;   // typing a monitor name
+            if (e.IsRepeat) return;   // holding a key must not move the window again and again
+            // Leave keys to controls that use them: the monitor name editor, the combo box, the slider.
+            if (e.OriginalSource is TextBox or ComboBox or ComboBoxItem or Slider) return;
+            if (Keyboard.Modifiers != ModifierKeys.None) return;
             if (WindowList.SelectedItem is not WindowInfo w) return;
+            if (e.Key == Key.Enter && e.OriginalSource is System.Windows.Controls.Primitives.ButtonBase) return;
             int n = e.Key switch
             {
                 >= Key.D1 and <= Key.D9 => e.Key - Key.D1 + 1,
@@ -711,7 +776,7 @@ namespace ScreenDeck
             if (_loadingOptions) return;
             _settings.MaximizeOnMove = MaximizeCheck.IsChecked == true;
             _settings.FadeOnMove = FadeCheck.IsChecked == true;
-            _settings.Save();
+            SaveSettingsSoon();
         }
 
         private void FadeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -719,7 +784,7 @@ namespace ScreenDeck
             UpdateFadeControls();
             if (_loadingOptions || FadeSlider == null) return;
             _settings.FadeDurationMs = (int)FadeSlider.Value;
-            _settings.Save();
+            SaveSettingsSoon();
         }
 
         private void UpdateFadeControls()
@@ -744,7 +809,8 @@ namespace ScreenDeck
 
         private ImageSource? GetIcon(WindowInfo w)
         {
-            if (_iconCache.TryGetValue(w.Handle, out var cached) && cached != null) return cached;
+            if (_iconCache.TryGetValue(w.Handle, out var cached) && (cached.Source != null || DateTime.UtcNow < cached.RetryAt))
+                return cached.Source;
             ImageSource? src = null;
             try
             {
@@ -776,7 +842,7 @@ namespace ScreenDeck
                     _exeIconCache[w.ProcessPath] = src;
                 }
             }
-            _iconCache[w.Handle] = src;
+            _iconCache[w.Handle] = new IconEntry(src, DateTime.UtcNow + IconRetry);
             return src;
         }
 
