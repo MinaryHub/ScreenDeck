@@ -25,9 +25,10 @@
   </ItemGroup>
 
   <!-- Bump BuildNumber.txt on every build and use it as the version's third part (1.0.N).
-       Skipped for VS design-time builds and the WPF temporary markup project. -->
+       Skipped for VS design-time builds, the WPF temporary markup project, and with -p:KeepBuildNumber=true
+       (the release workflow builds exactly the number committed in the release commit). -->
   <Target Name="IncrementBuildNumber" BeforeTargets="BeforeBuild"
-          Condition="'$(DesignTimeBuild)' != 'true' And !$(MSBuildProjectName.EndsWith('_wpftmp'))">
+          Condition="'$(DesignTimeBuild)' != 'true' And !$(MSBuildProjectName.EndsWith('_wpftmp')) And '$(KeepBuildNumber)' != 'true'">
     <PropertyGroup>
       <_BuildNumberFile>$(MSBuildThisFileDirectory)BuildNumber.txt</_BuildNumberFile>
       <_BuildNumber Condition="Exists('$(_BuildNumberFile)')">$([System.IO.File]::ReadAllText('$(_BuildNumberFile)').Trim())</_BuildNumber>

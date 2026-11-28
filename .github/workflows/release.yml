@@ -1,0 +1,71 @@
+# Builds ScreenDeck on Windows and publishes a GitHub release with the portable exe and the installer.
+# Run it from the Actions tab (Run workflow) after committing "Release 1.0.N": BuildNumber.txt holds N and
+# release-notes/1.0.N.md holds the release text. The build keeps the committed number (KeepBuildNumber).
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Publish single-file exe
+        shell: pwsh
+        run: |
+          dotnet publish src/ScreenDeck -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:KeepBuildNumber=true -o dist
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
+
+      - name: Read version and check release inputs
+        id: version
+        shell: pwsh
+        run: |
+          $fileVersion = (Get-Item dist/ScreenDeck.exe).VersionInfo.FileVersion   # e.g. 1.0.21.0
+          $v = $fileVersion -replace '\.0$', ''
+          $n = (Get-Content src/ScreenDeck/BuildNumber.txt -Raw).Trim()
+          if (-not $v.EndsWith(".$n")) { throw "exe version $fileVersion does not match BuildNumber.txt ($n)" }
+          if (-not (Test-Path "release-notes/$v.md")) { throw "release-notes/$v.md is missing" }
+          if (git ls-remote --tags origin "refs/tags/v$v") { throw "tag v$v already exists" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "fileversion=$fileVersion" >> $env:GITHUB_OUTPUT
+          Write-Host "Releasing $v"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup install failed" }
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc /Q installer/ScreenDeck.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem dist
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $setup = "dist/ScreenDeck-Setup-${{ steps.version.outputs.fileversion }}.exe"
+          if (-not (Test-Path $setup)) { throw "$setup not found" }
+          gh release create "v$v" dist/ScreenDeck.exe $setup --target "${{ github.sha }}" `
+            --title "ScreenDeck $v" --notes-file "release-notes/$v.md"
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
